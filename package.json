@@ -7,11 +7,11 @@
   "author": "LucasX7",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Lucas7X7/webhook-gateway-.git"
+    "url": "git+https://github.com/Lucas7X7/hookline.git"
   },
-  "homepage": "https://github.com/Lucas7X7/webhook-gateway-#readme",
+  "homepage": "https://github.com/Lucas7X7/hookline#readme",
   "bugs": {
-    "url": "https://github.com/Lucas7X7/webhook-gateway-/issues"
+    "url": "https://github.com/Lucas7X7/hookline/issues"
   },
   "bin": {
     "hookline": "./src/cli.ts"

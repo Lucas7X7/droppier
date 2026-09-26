@@ -58,13 +58,13 @@ Node 24+ required — hookline uses the built-in `node:sqlite` and runs TypeScri
 there is **no build step and no runtime dependency**. Nothing to install.
 
 ```bash
-git clone https://github.com/Lucas7X7/webhook-gateway-.git
-cd webhook-gateway-
+git clone https://github.com/Lucas7X7/hookline.git
+cd hookline
 node src/cli.ts dev
 ```
 
-Once it is on npm this becomes `npx hookline dev`, and the repository will be renamed to match
-the package. Until then the clone above is the whole install.
+Once it is on npm this becomes `npx hookline dev`. Until then the clone above is the whole
+install.
 
 ## Quick start
 
