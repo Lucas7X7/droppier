@@ -88,13 +88,36 @@ function fieldList(value: string, prefix: string): string[] {
     .map((part) => part.slice(prefix.length))
 }
 
+/**
+ * Age verdict for a provider timestamp header.
+ *
+ * Takes the raw string on purpose. An earlier version parsed it as
+ * `Number(value) * 1000 || null`, which has two ways to lie:
+ *
+ *  - a legitimate `t=0` becomes `null`, i.e. "no timestamp", and the freshness
+ *    check is skipped entirely — a correctly signed replay from 1970 came back
+ *    `valid`;
+ *  - a present-but-unparseable timestamp (`t=not-a-number`) also becomes
+ *    `null`, so a signature that checks out is reported `valid` even though
+ *    nothing established *when* it was signed.
+ *
+ * `Number.isFinite` is the real test for "not a number", and an unparseable
+ * timestamp is `stale`, not `valid`: freshness could not be established, and
+ * `valid` is the one verdict a caller is likely to act on.
+ *
+ * Absent stays `missing`, because the `generic` scheme signs the bare body
+ * with no timestamp at all and that is a legitimate `valid`. The timestamped
+ * providers reject a missing timestamp before ever getting here.
+ */
 function timestampAge(
-  timestamp: number | null,
+  rawTimestamp: string | undefined | null,
   toleranceMs: number,
   now: number,
 ): 'ok' | 'stale' | 'missing' {
-  if (timestamp === null) return 'missing'
-  const age = Math.abs(now - timestamp)
+  if (rawTimestamp === undefined || rawTimestamp === null || rawTimestamp === '') return 'missing'
+  const seconds = Number(rawTimestamp)
+  if (!Number.isFinite(seconds)) return 'stale'
+  const age = Math.abs(now - seconds * 1000)
   return age > toleranceMs ? 'stale' : 'ok'
 }
 
@@ -120,7 +143,7 @@ export function verifySignature(options: VerifyOptions): VerifyResult {
       if (!timestamp || signatures.length === 0) {
         return { verdict: 'invalid', scheme, error: 'malformed stripe-signature header' }
       }
-      const age = timestampAge(Number(timestamp) * 1000 || null, toleranceMs, now)
+      const age = timestampAge(timestamp, toleranceMs, now)
       const expected = hmacHex(secret, `${timestamp}.${rawBody}`)
       const matched = signatures.some((candidate) => safeEqual(candidate, expected))
       if (!matched) return { verdict: 'invalid', scheme, error: 'signature mismatch' }
@@ -155,7 +178,7 @@ export function verifySignature(options: VerifyOptions): VerifyResult {
       if (!timestamp || !signature) {
         return { verdict: 'invalid', scheme, error: 'missing slack timestamp or v0 signature' }
       }
-      const age = timestampAge(Number(timestamp) * 1000 || null, toleranceMs, now)
+      const age = timestampAge(timestamp, toleranceMs, now)
       const expected = hmacHex(secret, `v0:${timestamp}:${rawBody}`)
       if (!safeEqual(signature, expected)) {
         return { verdict: 'invalid', scheme, error: 'signature mismatch' }
@@ -173,7 +196,7 @@ export function verifySignature(options: VerifyOptions): VerifyResult {
       if (!id || !timestamp || signatures.length === 0) {
         return { verdict: 'invalid', scheme, error: 'missing svix-id, svix-timestamp or v1' }
       }
-      const age = timestampAge(Number(timestamp) * 1000 || null, toleranceMs, now)
+      const age = timestampAge(timestamp, toleranceMs, now)
       const expected = hmacB64(svixKey(secret), `${id}.${timestamp}.${rawBody}`)
       const matched = signatures.some((candidate) => safeEqual(candidate, expected))
       if (!matched) return { verdict: 'invalid', scheme, error: 'signature mismatch' }
@@ -217,7 +240,7 @@ export function verifySignature(options: VerifyOptions): VerifyResult {
       const timestamp = headers['x-hookline-timestamp']
       const signature = header.replace(/^(sha256=)?/, '')
       const data = timestamp ? `${timestamp}.${rawBody}` : rawBody
-      const age = timestampAge(timestamp ? Number(timestamp) * 1000 : null, toleranceMs, now)
+      const age = timestampAge(timestamp, toleranceMs, now)
       if (!safeEqual(signature, hmacHex(secret, data))) {
         return { verdict: 'invalid', scheme, error: 'signature mismatch' }
       }

@@ -102,10 +102,10 @@ checked against the real scheme — including the parts people get wrong:
 | twilio | sha1 over url + sorted params | needs `--public-url`, otherwise stays `unverified` instead of guessing |
 | generic | `x-hookline-signature` | for your own endpoints, with the same tolerance rules |
 
-Four verdicts, not two: `valid`, `invalid`, `stale` (correct signature, timestamp outside the
-window — a real replay attack signal) and `unverified` (no secret configured). A tampered payload
-is **stored and flagged**, never dropped, because "the webhook arrived and I couldn't read it" is
-exactly the thing you're debugging at 2am.
+Four verdicts, not two: `valid`, `invalid`, `stale` (correct signature, but the timestamp is
+outside the window or unreadable — a real replay attack signal) and `unverified` (no secret
+configured). A tampered payload is **stored and flagged**, never dropped, because "the webhook
+arrived and I couldn't read it" is exactly the thing you're debugging at 2am.
 
 **Retries are visible.** Providers retry on non-2xx. hookline links each retry to the original
 event instead of quietly giving you three copies of the same charge.
@@ -121,6 +121,21 @@ hookline replay <id> --chaos delay       # 2s late             -> timeout test
 ```
 
 If your handler survives `--chaos` with no double charge, it survives production.
+
+**Three query parameters, for rehearsing the failure instead of causing it.** Append them to
+whatever URL you already send:
+
+| parameter | effect |
+| --- | --- |
+| `__status=503` | hookline answers that status instead of 200 |
+| `__delay=2000` | hookline stalls before answering (capped at 30s) |
+| `__no-store=1` | answer 200 without recording anything |
+
+These are **ignored unless the request carries your token** (or you are running `--tunnel none`,
+where there is nothing public to protect). Ingest is unauthenticated on purpose, so leaving these
+open would let anyone who finds the public url force a 500 — a permanent retry storm in your
+provider — or pin a socket open. Your provider's real requests never send the token, so they are
+unaffected.
 
 **Share the evidence, not a screenshot.** Every event has a public, unlisted page
 (`/_hookline/p/<id>`, and `.json` for the raw record). Signature headers are stripped from that
@@ -211,7 +226,10 @@ implementation of the seven schemes above, with no dependencies.
   it; every `/api/*` and UI request needs it (`?t=`, `Authorization: Bearer`, or `x-hookline-token`).
 - **Public share pages redact signature headers** unless you pass both `?raw=1` and the token.
   Bodies are *not* redacted — a share link shows the full payload, so treat it like the payload.
-- **Retention is 7 days by default**; `hookline purge --before` or `--all` clears it.
+- **Retention is enforced automatically**, every hour and once at startup: events older than
+  `--retention <days>` (7 by default, `0` to keep everything) are deleted without being asked.
+  Set it to a number you would actually defend, because ingest is unauthenticated by design and
+  every stored body is raw, attacker-controllable bytes.
 - **Secrets come from env or a gitignored file.** They are never written to the database, and
   never printed in the UI.
 - This is a development tool. It stores raw request bodies on disk, and its tunnel makes your
@@ -221,7 +239,7 @@ implementation of the seven schemes above, with no dependencies.
 ## Development
 
 ```bash
-npm test          # 63 tests: signatures, store, http, curl, cli, relay end-to-end
+npm test          # 82 tests: signatures, store, http, curl, cli, relay end-to-end
 npm run typecheck
 ```
 

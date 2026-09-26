@@ -10,6 +10,9 @@ import { renderIndex, renderShare, renderNotFound } from './public/index.ts'
 const INTERNAL_PREFIX = '/_hookline'
 const MAX_BODY_BYTES = 5 * 1024 * 1024
 const NOISE_PATHS = new Set(['/favicon.ico', '/robots.txt'])
+const DAY_MS = 86_400_000
+const RETENTION_SWEEP_MS = 60 * 60_000
+const MAX_DELAY_MS = 30_000
 
 export interface ServerDeps {
   config: HooklineConfig
@@ -17,6 +20,11 @@ export interface ServerDeps {
   publicUrl: { current: string | null }
   onIngest?: (event: StoredEvent) => void
   log?: (line: string) => void
+  /**
+   * How often to enforce `config.retentionDays`. Exposed only so tests do not
+   * have to wait an hour; production callers should leave it alone.
+   */
+  retentionSweepMs?: number
 }
 
 export interface HooklineServer {
@@ -131,6 +139,33 @@ export function createHooklineServer(deps: ServerDeps): HooklineServer {
   const { config, store, publicUrl } = deps
   const log = deps.log ?? (() => {})
   const streams = new Set<ServerResponse>()
+  let retentionTimer: NodeJS.Timeout | null = null
+
+  /**
+   * Enforce the retention window.
+   *
+   * This used to be config that nothing read: `retentionDays` defaulted to 7,
+   * the banner printed "7d retention" and `hookline purge --before` existed,
+   * but no code path ever deleted anything on its own. On a public URL that is
+   * the difference between "stores payloads for a week" and "grows until the
+   * disk fills", because ingest is unauthenticated by design and every stored
+   * body is raw attacker-controllable bytes.
+   */
+  function sweepRetention(): number {
+    const days = config.retentionDays
+    if (days === null || !Number.isFinite(days) || days <= 0) return 0
+    const removed = store.purge({ before: Date.now() - days * DAY_MS })
+    if (removed > 0) log(`retention: purged ${removed} event(s) older than ${days}d`)
+    return removed
+  }
+
+  function startRetentionSweep(): void {
+    if (retentionTimer) return
+    sweepRetention()
+    retentionTimer = setInterval(sweepRetention, deps.retentionSweepMs ?? RETENTION_SWEEP_MS)
+    // Never let the sweep be the reason the process refuses to exit.
+    retentionTimer.unref()
+  }
 
   function broadcast(event: StoredEvent): void {
     const payload = `event: event\ndata: ${JSON.stringify(event)}\n\n`
@@ -204,15 +239,25 @@ export function createHooklineServer(deps: ServerDeps): HooklineServer {
         }
 
         const body = await readBody(req, MAX_BODY_BYTES)
-        const statusParam = Number(url.searchParams.get('__status') ?? 200)
-        const delayParam = Number(url.searchParams.get('__delay') ?? 0)
-        const persist = url.searchParams.get('__no-store') !== '1'
+        // The `__` escape hatches exist to let you rehearse a failure against
+        // your own handler (force a 503, stall, skip the store) without
+        // writing a second request by hand. They are deliberately inert unless
+        // the caller is authorised: this is an unauthenticated endpoint by
+        // design, and anyone who can reach the public url could otherwise make
+        // hookline return 500 forever — which is precisely the retry storm the
+        // tool is supposed to make visible — or pin a socket open for 30s.
+        // With no token configured (`--tunnel none`, CI) there is nothing to
+        // protect, so they stay open for local use.
+        const trusted = authorized(config, url, req)
+        const statusParam = trusted ? Number(url.searchParams.get('__status') ?? 200) : 200
+        const delayParam = trusted ? Number(url.searchParams.get('__delay') ?? 0) : 0
+        const persist = !trusted || url.searchParams.get('__no-store') !== '1'
         const status =
           Number.isInteger(statusParam) && statusParam >= 100 && statusParam <= 599
             ? statusParam
             : 200
         if (Number.isFinite(delayParam) && delayParam > 0) {
-          await new Promise((r) => setTimeout(r, Math.min(delayParam, 30_000)))
+          await new Promise((r) => setTimeout(r, Math.min(delayParam, MAX_DELAY_MS)))
         }
         const { event } = await handleIngest({
           method: req.method ?? 'GET',
@@ -469,11 +514,16 @@ export function createHooklineServer(deps: ServerDeps): HooklineServer {
         server.listen(port, host, () => {
           const address = server.address()
           const actualPort = typeof address === 'object' && address ? address.port : port
+          startRetentionSweep()
           resolvePromise(`http://${host}:${actualPort}`)
         })
       })
     },
     close(): Promise<void> {
+      if (retentionTimer) {
+        clearInterval(retentionTimer)
+        retentionTimer = null
+      }
       for (const res of streams) res.end()
       streams.clear()
       return new Promise((resolvePromise) => {

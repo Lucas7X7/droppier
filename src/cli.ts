@@ -128,7 +128,11 @@ function banner(config: HooklineConfig, localUrl: string, tunnel: {
   }
   lines.push(
     `  ${dim('inbox   ')} ${cyan(inboxUrl)}`,
-    `  ${dim('db      ')} ${dim(config.db)}${config.retentionDays ? dim(` (${config.retentionDays}d retention)`) : ''}`,
+    `  ${dim('db      ')} ${dim(config.db)}${
+      config.retentionDays
+        ? dim(` (${config.retentionDays}d retention)`)
+        : amber(' (retention off — events are kept until you purge them)')
+    }`,
     `  ${dim('secrets ')} ${
       Object.keys(config.secrets).length > 0
         ? Object.keys(config.secrets).map((provider) => purple(provider)).join(dim(', '))
@@ -461,7 +465,7 @@ ${bold('dev options')}
   --secret <value>        secret for --provider, sets signature verification
   --provider <name>       stripe | github | slack | svix | shopify | twilio | generic
   --tolerance <ms>        signature timestamp tolerance (default 300000)
-  --retention <days>      auto-purge window (default 7)
+  --retention <days>      auto-purge window, enforced hourly (default 7, 0 disables)
   --token <value>         ui/api token; generated automatically when a tunnel is on
 
 ${bold('environment')}

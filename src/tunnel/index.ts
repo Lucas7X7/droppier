@@ -41,10 +41,6 @@ function which(binary: string): string | null {
   return null
 }
 
-function spawnAndMatch(): never {
-  throw new Error('unused')
-}
-
 async function ensureKey(keyPath: string): Promise<string> {
   if (!existsSync(keyPath)) {
     mkdirSync(resolve(keyPath, '..'), { recursive: true })

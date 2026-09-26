@@ -5,39 +5,56 @@ import { dirname, resolve } from 'node:path'
 import type { ListQuery, Provider, Stats, StoredEvent, Verdict } from './types.ts'
 import { codeToVerdict, verdictToCode } from './types.ts'
 
-const SCHEMA_VERSION = 1
+type Row = Record<string, unknown>
 
-const MIGRATIONS: string[] = [
-  `
-  create table if not exists events (
-    seq              integer primary key autoincrement,
-    id               text not null unique,
-    received_at      integer not null,
-    provider         text not null,
-    event_type       text not null default '',
-    method           text not null default 'POST',
-    path             text not null default '/',
-    query            text not null default '',
-    headers          text not null default '{}',
-    body             text not null default '',
-    pretty           text,
-    dedupe_key       text,
-    duplicate_of     text,
-    verdict          integer not null default 2,
-    signature_scheme text not null default 'none',
-    signature_error  text,
-    status           integer not null default 200,
-    duration_ms      integer not null default 0,
-    remote_addr      text not null default ''
-  );
-  create index if not exists events_received_at on events (received_at desc);
-  create index if not exists events_dedupe_key on events (dedupe_key);
-  create index if not exists events_provider on events (provider);
-  `,
-  `
-  alter table events add column replay_of text;
-  alter table events add column note text;
-  `,
+/**
+ * `alter table ... add column` has no `if not exists` in SQLite, and it cannot be
+ * folded into the `create table`. So check the column list first and make every
+ * add idempotent — that way a database left half-migrated by an older build
+ * (crashed between two alters) repairs itself instead of dying on
+ * `duplicate column name` forever.
+ */
+function addColumn(db: DatabaseSync, table: string, column: string, type: string): void {
+  const columns = db.prepare(`pragma table_info(${table})`).all() as Row[]
+  if (columns.some((row) => row.name === column)) return
+  db.exec(`alter table ${table} add column ${column} ${type}`)
+}
+
+type Migration = (db: DatabaseSync) => void
+
+const MIGRATIONS: Migration[] = [
+  (db) => {
+    db.exec(`
+    create table if not exists events (
+      seq              integer primary key autoincrement,
+      id               text not null unique,
+      received_at      integer not null,
+      provider         text not null,
+      event_type       text not null default '',
+      method           text not null default 'POST',
+      path             text not null default '/',
+      query            text not null default '',
+      headers          text not null default '{}',
+      body             text not null default '',
+      pretty           text,
+      dedupe_key       text,
+      duplicate_of     text,
+      verdict          integer not null default 2,
+      signature_scheme text not null default 'none',
+      signature_error  text,
+      status           integer not null default 200,
+      duration_ms      integer not null default 0,
+      remote_addr      text not null default ''
+    );
+    create index if not exists events_received_at on events (received_at desc);
+    create index if not exists events_dedupe_key on events (dedupe_key);
+    create index if not exists events_provider on events (provider);
+  `)
+  },
+  (db) => {
+    addColumn(db, 'events', 'replay_of', 'text')
+    addColumn(db, 'events', 'note', 'text')
+  },
 ]
 
 export interface NewEvent {
@@ -66,7 +83,6 @@ export interface Store {
   list(query: ListQuery): { events: StoredEvent[]; nextCursor: number | null }
   stats(): Stats
   purge(options: { before?: number; all?: boolean }): number
-  pruneDedupeKeys(): void
   close(): void
 }
 
@@ -89,8 +105,6 @@ function prettyJson(body: string): string | null {
     return null
   }
 }
-
-type Row = Record<string, unknown>
 
 function toEvent(row: Row): StoredEvent {
   return {
@@ -231,10 +245,30 @@ export function openStore(file: string): Store {
       ?.value ?? 0,
   )
   for (let version = applied; version < MIGRATIONS.length; version++) {
-    db.exec(MIGRATIONS[version]!)
-    db.prepare(
-      'insert into meta (key, value) values (?, ?) on conflict (key) do update set value = excluded.value',
-    ).run('schema_version', String(version + 1))
+    // One transaction per migration, with the version bump inside it. Before
+    // this, the alters ran outside any transaction and the version was written
+    // afterwards, so a crash between the two `alter table` statements left the
+    // schema half-applied with the old version still recorded — and every
+    // subsequent start re-ran the migration and died on `duplicate column
+    // name`, bricking the inbox.
+    db.exec('begin')
+    try {
+      MIGRATIONS[version]!(db)
+      db.prepare(
+        'insert into meta (key, value) values (?, ?) on conflict (key) do update set value = excluded.value',
+      ).run('schema_version', String(version + 1))
+      db.exec('commit')
+    } catch (error) {
+      try {
+        db.exec('rollback')
+      } catch {
+        // Already rolled back by SQLite itself; the original error is the useful one.
+      }
+      throw new Error(
+        `schema migration ${version + 1} failed, database left unchanged: ${(error as Error).message}`,
+        { cause: error },
+      )
+    }
   }
 
   const insertStmt = db.prepare(`
@@ -392,15 +426,6 @@ export function openStore(file: string): Store {
         return Number(result.changes)
       }
       return 0
-    },
-
-    pruneDedupeKeys(): void {
-      db.exec(`
-        update events set dedupe_key = null
-        where duplicate_of is null
-          and dedupe_key is not null
-          and seq not in (select max(seq) from events group by dedupe_key);
-      `)
     },
 
     close(): void {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { openStore } from '../src/store.ts'
 import { signPayload } from '../src/verify.ts'
 
@@ -201,6 +202,75 @@ test('migrations are idempotent across reopen', () => {
     assert.equal(event.replayOf, null)
     assert.equal(event.note, null)
     second.close()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a database left half-migrated by an older build repairs itself', () => {
+  // Older builds ran the two `alter table add column` statements outside a
+  // transaction and recorded the version afterwards, so a crash in between left
+  // `replay_of` present, `note` missing, and the version still claiming 1. The
+  // next start re-ran the migration and died on `duplicate column name`, which
+  // bricked the inbox permanently.
+  const dir = mkdtempSync(join(tmpdir(), 'hookline-migrate-legacy-'))
+  const file = join(dir, 'inbox.db')
+  try {
+    const first = openStore(file)
+    const seeded = stripeEvent(first)
+    first.close()
+
+    const damaged = new DatabaseSync(file)
+    damaged.exec('alter table events drop column note')
+    damaged
+      .prepare('update meta set value = ? where key = ?')
+      .run('1', 'schema_version')
+    damaged.close()
+
+    const repaired = openStore(file)
+    try {
+      const event = repaired.get(seeded.id)!
+      assert.equal(event.note, null, 'the missing column is added back')
+      assert.equal(event.replayOf, null, 'the column already there is left alone')
+      const version = (
+        new DatabaseSync(file)
+          .prepare('select value from meta where key = ?')
+          .get('schema_version') as { value: string }
+      ).value
+      assert.equal(version, '2')
+    } finally {
+      repaired.close()
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a failed migration rolls back and says so', () => {
+  // The version bump shares the migration's transaction, so a failure can
+  // never be recorded as applied — otherwise the next start would skip the
+  // migration that never actually finished.
+  const dir = mkdtempSync(join(tmpdir(), 'hookline-migrate-fail-'))
+  const file = join(dir, 'inbox.db')
+  try {
+    const broken = new DatabaseSync(file)
+    broken.exec('create table meta (key text primary key, value text not null)')
+    // An `events` table with none of the expected columns: `create table if not
+    // exists` is a no-op, and the index on `provider` then fails.
+    broken.exec('create table events (seq integer primary key)')
+    broken.prepare('insert into meta (key, value) values (?, ?)').run('schema_version', '0')
+    broken.close()
+
+    assert.throws(() => openStore(file), /schema migration 1 failed, database left unchanged/)
+
+    const after = new DatabaseSync(file)
+    const version = (
+      after.prepare('select value from meta where key = ?').get('schema_version') as {
+        value: string
+      }
+    ).value
+    assert.equal(version, '0', 'the failed migration must not be recorded as applied')
+    after.close()
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

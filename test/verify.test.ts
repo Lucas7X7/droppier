@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { createHmac } from 'node:crypto'
 import { verifySignature, signPayload, detectProvider, schemeFor } from '../src/verify.ts'
 import type { Provider } from '../src/types.ts'
 
@@ -165,6 +166,53 @@ for (const provider of ['stripe', 'slack', 'svix', 'generic'] as const) {
     assert.equal(result.verdict, 'stale')
   })
 }
+
+test('a timestamp of 0 is checked for staleness, not treated as absent', () => {
+  // `Number(t) * 1000 || null` turns a legitimate epoch of 0 into `null`,
+  // which the age check reads as "no timestamp supplied" — so a correctly
+  // signed request from 1970 came back `valid` instead of `stale`. The
+  // signature still has to check out; only the age verdict is what's at stake.
+  const secret = 'secret_value'
+  const headers = {
+    'stripe-signature': `t=0,v1=${createHmac('sha256', secret).update(`0.${body}`).digest('hex')}`,
+  }
+  const stale = verifySignature({
+    provider: 'stripe',
+    headers,
+    rawBody: body,
+    secrets: { stripe: secret },
+    toleranceMs: 60_000,
+    now: 120_000,
+  })
+  assert.equal(stale.verdict, 'stale')
+  assert.match(stale.error ?? '', /tolerance/)
+
+  const inWindow = verifySignature({
+    provider: 'stripe',
+    headers,
+    rawBody: body,
+    secrets: { stripe: secret },
+    toleranceMs: 60_000,
+    now: 30_000,
+  })
+  assert.equal(inWindow.verdict, 'valid')
+})
+
+test('a garbage timestamp is reported as stale rather than crashing', () => {
+  const secret = 'secret_value'
+  const headers = {
+    'stripe-signature': `t=not-a-number,v1=${createHmac('sha256', secret).update(`not-a-number.${body}`).digest('hex')}`,
+  }
+  const result = verifySignature({
+    provider: 'stripe',
+    headers,
+    rawBody: body,
+    secrets: { stripe: secret },
+    toleranceMs: 60_000,
+    now: Date.now(),
+  })
+  assert.equal(result.verdict, 'stale')
+})
 
 test('svix: secret is base64 after the whsec_ prefix', () => {
   const secretBytes = Buffer.from('super-secret-bytes')

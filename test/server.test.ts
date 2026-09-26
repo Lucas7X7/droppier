@@ -258,17 +258,67 @@ test('escape hatches for probes: __no-store, __status and __delay', async () => 
         total: number
       }).total
 
-    const probe = await fetch(`${app.base}/health?__no-store=1`)
+    const probe = await fetch(`${app.base}/health?__no-store=1`, { headers: auth })
     assert.equal(probe.status, 200)
     assert.deepEqual(await probe.json(), { ok: true, stored: false })
     assert.equal(await countEvents(), 0)
 
     const failing = await fetch(`${app.base}/boom?__status=503`, {
       method: 'POST',
+      headers: auth,
       body: 'nope',
     })
     assert.equal(failing.status, 503)
     assert.equal(await countEvents(), 1)
+  } finally {
+    await app.close()
+  }
+})
+
+test('the __ escape hatches are inert for an unauthenticated caller', async () => {
+  // Ingest is deliberately unauthenticated, so anything reachable from the
+  // public url can hit it. Without a token these hatches let a stranger force
+  // a 500 (a retry storm in the provider, which is the failure this tool is
+  // meant to surface), stall a socket for 30s, or get a 200 without the
+  // request ever being recorded.
+  const app = await harness()
+  try {
+    const auth = { 'x-hookline-token': app.token }
+    const total = async (): Promise<number> =>
+      ((await (await fetch(`${app.base}/_hookline/api/stats`, { headers: auth })).json()) as {
+        total: number
+      }).total
+
+    const before = await total()
+
+    const forced = await fetch(`${app.base}/hook?__status=503`, { method: 'POST', body: '{}' })
+    assert.equal(forced.status, 200, '__status must not be honoured without the token')
+    assert.equal(await total(), before + 1, 'the event must still be stored')
+
+    const skipped = await fetch(`${app.base}/hook?__no-store=1`, { method: 'POST', body: '{}' })
+    assert.equal(skipped.status, 200)
+    assert.equal(await total(), before + 2, '__no-store must not skip storage without the token')
+
+    // A provider sending the real webhook url never carries the token, so the
+    // common case is unaffected: it stores, and it answers 200.
+    const plain = await fetch(`${app.base}/hook`, { method: 'POST', body: '{}' })
+    assert.equal(plain.status, 200)
+    assert.equal(await total(), before + 3)
+  } finally {
+    await app.close()
+  }
+})
+
+test('the __ escape hatches stay open when no token is configured', async () => {
+  // `--tunnel none` (and CI) has no token because there is nothing public to
+  // protect, and the hatches are the point of running local.
+  const app = await harness({ token: null, tunnel: 'none' })
+  try {
+    const forced = await fetch(`${app.base}/hook?__status=503`, { method: 'POST', body: '{}' })
+    assert.equal(forced.status, 503)
+
+    const skipped = await fetch(`${app.base}/hook?__no-store=1`, { method: 'POST', body: '{}' })
+    assert.deepEqual(await skipped.json(), { ok: true, stored: false })
   } finally {
     await app.close()
   }
@@ -318,5 +368,165 @@ test('browser noise never lands in the inbox', async () => {
     assert.equal(after.unverified, before.unverified)
   } finally {
     await app.close()
+  }
+})
+
+/**
+ * A harness that also hands back the store, so a test can plant events with an
+ * arbitrary `receivedAt` — the retention sweep can only be observed on rows
+ * that are actually old.
+ */
+async function storeHarness(
+  overrides: Record<string, unknown> = {},
+  retentionSweepMs = 25,
+): Promise<{ store: ReturnType<typeof openStore>; close: () => Promise<void> }> {
+  const dir = mkdtempSync(join(tmpdir(), 'hookline-retention-'))
+  const config = loadConfig(
+    process.cwd(),
+    { db: join(dir, 'inbox.db'), port: 0, token: 'test-token', tunnel: 'none', ...overrides },
+    {},
+  )
+  const store = openStore(config.db)
+  const server = createHooklineServer({
+    config,
+    store,
+    publicUrl: { current: null },
+    retentionSweepMs,
+  })
+  await server.listen(0, '127.0.0.1')
+  return {
+    store,
+    async close() {
+      await server.close()
+      store.close()
+      rmSync(dir, { recursive: true, force: true })
+    },
+  }
+}
+
+function agedEvent(store: ReturnType<typeof openStore>, ageMs: number): string {
+  const body = JSON.stringify({ id: `evt_${ageMs}`, type: 'charge.succeeded' })
+  return store.append({
+    receivedAt: Date.now() - ageMs,
+    provider: 'stripe',
+    eventType: '',
+    method: 'POST',
+    path: '/stripe',
+    query: '',
+    headers: signPayload({ provider: 'stripe', secret: SECRET, rawBody: body }),
+    body,
+    verdict: 'valid',
+    signatureScheme: 'hmac-sha256/timestamped',
+    signatureError: null,
+    status: 200,
+    durationMs: 1,
+    remoteAddr: '127.0.0.1',
+  }).id
+}
+
+const settle = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+test('retention is enforced on a timer, not just on request', async () => {
+  // The README promises "retention is 7 days by default" and the banner prints
+  // "7d retention", but for a while nothing read the setting: `purge` was only
+  // ever called by hand. On a public url that means the disk fills with
+  // unauthenticated, attacker-sized bodies.
+  const app = await storeHarness({ retentionDays: 7 })
+  try {
+    const old = agedEvent(app.store, 8 * 86_400_000)
+    const fresh = agedEvent(app.store, 60_000)
+    assert.equal(app.store.stats().total, 2)
+
+    await settle(150)
+
+    assert.equal(app.store.get(old), null, 'an 8-day-old event must be swept')
+    assert.notEqual(app.store.get(fresh), null, 'a 1-minute-old event must survive')
+    assert.equal(app.store.stats().total, 1)
+  } finally {
+    await app.close()
+  }
+})
+
+test('retention sweeps the backlog once at startup', async () => {
+  // Restarting after being offline for a week should not leave a week of events
+  // sitting in the inbox until the first sweep tick.
+  const dir = mkdtempSync(join(tmpdir(), 'hookline-retention-boot-'))
+  const db = join(dir, 'inbox.db')
+  try {
+    const first = openStore(db)
+    const stale = agedEvent(first, 30 * 86_400_000)
+    const kept = agedEvent(first, 1_000)
+    first.close()
+
+    const config = loadConfig(
+      process.cwd(),
+      { db, port: 0, token: 'test-token', tunnel: 'none', retentionDays: 7 },
+      {},
+    )
+    const store = openStore(config.db)
+    const server = createHooklineServer({
+      config,
+      store,
+      publicUrl: { current: null },
+      retentionSweepMs: 60 * 60_000,
+    })
+    await server.listen(0, '127.0.0.1')
+    try {
+      assert.equal(store.get(stale), null, 'the month-old event is gone on boot')
+      assert.notEqual(store.get(kept), null)
+    } finally {
+      await server.close()
+      store.close()
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('retention can be turned off without deleting anything', async () => {
+  const app = await storeHarness({ retentionDays: null }, 20)
+  try {
+    const ancient = agedEvent(app.store, 400 * 86_400_000)
+    await settle(120)
+    assert.notEqual(app.store.get(ancient), null, 'retention: null must keep everything')
+  } finally {
+    await app.close()
+  }
+})
+
+test('the retention sweep is torn down with the server', async () => {
+  // A leaked interval would keep writing to a closed database (or hold the
+  // process open) long after `dev` exits. The store is left open deliberately
+  // so a surviving sweep would be observable rather than throwing.
+  const dir = mkdtempSync(join(tmpdir(), 'hookline-retention-stop-'))
+  const config = loadConfig(
+    process.cwd(),
+    { db: join(dir, 'inbox.db'), port: 0, token: 'test-token', tunnel: 'none', retentionDays: 7 },
+    {},
+  )
+  const store = openStore(config.db)
+  const server = createHooklineServer({
+    config,
+    store,
+    publicUrl: { current: null },
+    retentionSweepMs: 20,
+  })
+  try {
+    await server.listen(0, '127.0.0.1')
+    const old = agedEvent(store, 8 * 86_400_000)
+    await settle(120)
+    assert.equal(store.get(old), null, 'the sweep runs while the server is up')
+
+    await server.close()
+    const survivor = agedEvent(store, 8 * 86_400_000)
+    await settle(120)
+    assert.notEqual(
+      store.get(survivor),
+      null,
+      'no sweep may run after close — the interval has to be cleared',
+    )
+  } finally {
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
   }
 })

@@ -27,6 +27,27 @@ export const CONFIG_FILENAMES = ['.hookline.json', 'hookline.config.json']
 
 const TUNNEL_KINDS: TunnelKind[] = ['none', 'ssh', 'cloudflared', 'relay']
 
+/**
+ * `retentionDays` reaches config from three places that disagree about types:
+ * a JSON file (number), `HOOKLINE_RETENTION_DAYS` (string) and `--retention`
+ * (number). Normalise once, here, so nothing downstream has to re-check.
+ *
+ * `undefined` keeps the documented 7-day default; `null` or `0` disables the
+ * sweep entirely. A non-numeric value is a typo and throws rather than
+ * silently turning retention off.
+ */
+function normalizeRetention(value: unknown): number | null {
+  if (value === undefined) return 7
+  if (value === null || value === '') return null
+  const days = Number(value)
+  if (!Number.isFinite(days)) {
+    throw new Error(
+      `invalid retention: ${String(value)} (expected a number of days, or 0 to keep everything)`,
+    )
+  }
+  return days > 0 ? days : null
+}
+
 function fromFile(workdir: string): Partial<HooklineConfig> {
   for (const name of CONFIG_FILENAMES) {
     const path = resolve(workdir, name)
@@ -106,7 +127,7 @@ export function loadConfig(
     tunnelName: merged.tunnelName ?? null,
     relayUrl: merged.relayUrl ?? null,
     relayToken: merged.relayToken ?? null,
-    retentionDays: merged.retentionDays === undefined ? 7 : merged.retentionDays,
+    retentionDays: normalizeRetention(merged.retentionDays),
     secrets,
     pretty: merged.pretty ?? true,
     workdir,
