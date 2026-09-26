@@ -1,0 +1,43 @@
+{
+  "name": "hookline",
+  "version": "0.1.0",
+  "description": "A stable public URL for webhooks, with an inbox. No signup, no card, no dashboard.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "hookline": "./src/cli.ts"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "files": [
+    "src",
+    "relay",
+    "examples",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "node src/cli.ts dev",
+    "test": "node --test",
+    "test:watch": "node --test --watch",
+    "typecheck": "tsc --noEmit",
+    "relay": "node relay/server.ts"
+  },
+  "keywords": [
+    "webhook",
+    "webhooks",
+    "tunnel",
+    "inbox",
+    "request-bin",
+    "webhook.site",
+    "ngrok",
+    "localhost",
+    "stripe",
+    "github-webhooks"
+  ],
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "@types/node": "^24.0.0"
+  }
+}

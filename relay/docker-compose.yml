@@ -1,0 +1,24 @@
+# hookline relay — the public half of the tunnel.
+#
+#   RELAY_TOKEN=$(openssl rand -hex 16) docker compose up -d
+#
+# Point relay/Caddyfile.example (or nginx) at port 8080 for TLS.
+services:
+  relay:
+    build:
+      context: ..
+      dockerfile: relay/Dockerfile
+    image: hookline-relay
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      RELAY_DOMAIN: relay.example.com
+      RELAY_TOKEN: ${RELAY_TOKEN:?set RELAY_TOKEN, e.g. openssl rand -hex 16}
+      RELAY_TIMEOUT_MS: "30000"
+    ports:
+      - "127.0.0.1:8080:8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

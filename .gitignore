@@ -1,0 +1,10 @@
+node_modules/
+*.log
+.hookline/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.env
+.DS_Store
+dist/

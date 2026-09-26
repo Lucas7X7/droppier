@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 24 is the minimum we support (node:sqlite + native type stripping);
+        # current is kept honest so a breaking change is caught before release.
+        node: ['24', 'current']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  relay-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The relay image is what people self-host, so it gets built, not just linted.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: relay/Dockerfile
+          push: false
+          load: true
+          tags: hookline-relay:ci
+      - run: |
+          docker run -d --name relay -e RELAY_DOMAIN=relay.test -e RELAY_TOKEN=ci-token -p 8080:8080 hookline-relay:ci
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8080/healthz && break
+            sleep 1
+          done
+          # An unauthenticated client must be rejected, not silently connected.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST 'http://127.0.0.1:8080/connect?name=x' -H 'Authorization: Bearer wrong')
+          test "$code" = "401" || { echo "expected 401 for a bad token, got $code"; exit 1; }
+          # The image must also run as the unprivileged `node` user.
+          test "$(docker exec relay id -un)" = "node" || { echo "relay must not run as root"; exit 1; }
+          echo "relay image ok"

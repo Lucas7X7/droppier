@@ -1,0 +1,37 @@
+# Caddy configuration for the hookline relay.
+#
+#   1. caddy run --config relay/Caddyfile.example
+#   2. hookline dev --tunnel relay --relay-url https://relay.example.com \
+#        --name myapp --relay-token "$RELAY_TOKEN"
+#
+# A wildcard subdomain (myapp.relay.example.com) needs a wildcard certificate.
+# Caddy gets one automatically with the DNS or HTTP challenge, as long as
+# *.relay.example.com resolves to this host:
+#
+#   *.relay.example.com.   IN  A   203.0.113.10
+#   relay.example.com.     IN  A   203.0.113.10
+
+relay.example.com, *.relay.example.com {
+	# flush_interval -1 disables response buffering. This is the load-bearing
+	# line: /connect is a single chunked request whose body never ends, and
+	# responses are streamed NDJSON frames.
+	reverse_proxy 127.0.0.1:8080 {
+		flush_interval -1
+		transport http {
+			# Keep the duplex stream open for as long as the client holds it.
+			read_timeout 24h
+			write_timeout 24h
+		}
+	}
+
+	# Bodies are capped at 5 MB in the relay; keep the proxy consistent so you
+	# get a clear 413 from the edge instead of a truncated stream.
+	request_body {
+		max_size 5MB
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

@@ -1,0 +1,17 @@
+{
+  "port": 4000,
+  "tunnel": "ssh",
+  "tunnelName": "myapp",
+  "db": ".hookline/inbox.db",
+  "retentionDays": 7,
+  "toleranceMs": 300000,
+  "secrets": {
+    "stripe": "whsec_replace_me",
+    "github": "replace_me",
+    "slack": "replace_me",
+    "svix": "whsec_replace_me",
+    "shopify": "replace_me",
+    "twilio": "replace_me",
+    "generic": "replace_me"
+  }
+}
