@@ -66,6 +66,86 @@ async function ensureKey(keyPath: string): Promise<string> {
   return readFileSync(`${keyPath}.pub`, 'utf8')
 }
 
+/**
+ * Pull a public URL out of a tunnel log line.
+ *
+ * localhost.run hands out `*.lhr.life` as well as `*.localhost.run` (the
+ * domain it prints changed at some point), so both have to be accepted — the
+ * old single-domain regex silently never matched, and `dev` hung forever
+ * waiting for a URL that had already been printed.
+ */
+export function parseTunnelUrl(line: string): string | null {
+  // The url has to end the token: a documentation link like
+  // https://admin.localhost.run/ is followed by a slash and more text, and
+  // those lines are printed *before* the real tunnel line.
+  const match =
+    /https:\/\/([A-Za-z0-9-]+)\.(?:localhost\.run|lhr\.life|trycloudflare\.com)(?=[\s.,]|$)/.exec(line)
+  if (!match) return null
+  const host = match[1] ?? ''
+  // localhost.run's own admin/docs subdomains are not tunnels.
+  if (/^(admin|docs|www)$/i.test(host)) return null
+  return match[0].replace(/[.,]+$/, '')
+}
+
+/** The part of a spawned tunnel process this guard needs; keeps it testable. */
+interface Killable {
+  // `any` here, not `never[]`: ChildProcess.once() is overloaded with
+  // `(...args: any[]) => void` and is not assignable to a stricter signature.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  once(event: string, listener: (...args: any[]) => void): unknown
+  kill(signal?: string | number): unknown
+}
+
+/**
+ * Watch a tunnel child so `dev` can never hang or die silently.
+ *
+ * Three things used to go wrong: a URL that was never recognised left the
+ * process awaiting forever, a child that exited early was never reported, and
+ * (a bug of my own, caught by running it) the watchdog killed a perfectly
+ * healthy tunnel 30s after start because nothing told it the URL had arrived.
+ * `establish()` disarms the kill; after that an exit is only reported, never
+ * fatal, because by then the tunnel is the user's only way in.
+ */
+export function tunnelGuard(
+  child: Killable,
+  kind: string,
+  onLog?: (line: string) => void,
+): { failure: Promise<never>; establish: () => void } {
+  let established = false
+  let rejectFailure: (error: Error) => void = () => {}
+  const failure = new Promise<never>((_, rejectPromise) => {
+    rejectFailure = rejectPromise
+  })
+  // Nothing should ever reject this promise; it exists so the guard's
+  // internal bookkeeping cannot crash the process.
+  void failure.catch(() => {})
+
+  const report = (reason: string): void => {
+    if (established) {
+      onLog?.(`  ! tunnel (${kind}) ${reason} — the public url is dead, restart \`hookline dev\``)
+      return
+    }
+    established = true
+    child.kill('SIGTERM')
+    rejectFailure(new Error(`tunnel (${kind}) ${reason}`))
+  }
+
+  child.once('exit', (code: number | null, signal: string | null) => {
+    report(`exited before serving (code ${code ?? 'null'}, signal ${signal ?? 'none'})`)
+  })
+  child.once('error', (error: Error) => report(`failed to start: ${error.message}`))
+  const timer = setTimeout(() => report('never reported a public url within 30s'), 30_000)
+  timer.unref()
+
+  return {
+    failure,
+    establish: () => {
+      established = true
+      clearTimeout(timer)
+    },
+  }
+}
+
 async function openSshTunnel(options: TunnelOptions): Promise<Tunnel> {
   const keyPath = resolve(options.workdir, '.hookline', 'id_ed25519')
   const publicKey = await ensureKey(keyPath)
@@ -89,6 +169,7 @@ async function openSshTunnel(options: TunnelOptions): Promise<Tunnel> {
     resolveUrl = resolvePromise
   })
   const child = spawn('ssh', args)
+  const guard = tunnelGuard(child, 'ssh', options.onLog)
   let buffer = ''
   child.stdout.on('data', (chunk: Buffer) => {
     buffer += chunk.toString('utf8')
@@ -98,8 +179,8 @@ async function openSshTunnel(options: TunnelOptions): Promise<Tunnel> {
       const trimmed = line.trim()
       if (!trimmed) continue
       options.onLog?.(`  ${trimmed}`)
-      const match = /https:\/\/([A-Za-z0-9-]+)\.localhost\.run/.exec(trimmed)
-      if (match) resolveUrl(`https://${match[1]}.localhost.run`)
+      const url = parseTunnelUrl(trimmed)
+      if (url) resolveUrl(url)
     }
   })
   child.stderr.on('data', (chunk: Buffer) => {
@@ -110,7 +191,8 @@ async function openSshTunnel(options: TunnelOptions): Promise<Tunnel> {
   const timeout = setTimeout(() => {
     child.kill('SIGTERM')
   }, 20_000)
-  const url = await urlPromise.finally(() => clearTimeout(timeout))
+  const url = await Promise.race([urlPromise, guard.failure]).finally(() => clearTimeout(timeout))
+  guard.establish()
   return {
     url,
     kind: 'ssh',
@@ -133,6 +215,7 @@ async function openCloudflaredTunnel(options: TunnelOptions): Promise<Tunnel> {
   const urlPromise = new Promise<string>((resolvePromise) => {
     resolveUrl = resolvePromise
   })
+  const guard = tunnelGuard(child, 'cloudflared', options.onLog)
   let buffer = ''
   child.stdout.on('data', (chunk: Buffer) => {
     buffer += chunk.toString('utf8')
@@ -142,8 +225,8 @@ async function openCloudflaredTunnel(options: TunnelOptions): Promise<Tunnel> {
       const trimmed = line.trim()
       if (!trimmed) continue
       options.onLog?.(`  ${trimmed}`)
-      const match = /https:\/\/[A-Za-z0-9-]+\.trycloudflare\.com/.exec(trimmed)
-      if (match) resolveUrl(match[0])
+      const url = parseTunnelUrl(trimmed)
+      if (url) resolveUrl(url)
     }
   })
   child.stderr.on('data', (chunk: Buffer) => {
@@ -152,7 +235,8 @@ async function openCloudflaredTunnel(options: TunnelOptions): Promise<Tunnel> {
     }
   })
   const timeout = setTimeout(() => child.kill('SIGTERM'), 25_000)
-  const url = await urlPromise.finally(() => clearTimeout(timeout))
+  const url = await Promise.race([urlPromise, guard.failure]).finally(() => clearTimeout(timeout))
+  guard.establish()
   return {
     url,
     kind: 'cloudflared',
