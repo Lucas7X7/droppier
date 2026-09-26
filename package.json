@@ -4,6 +4,15 @@
   "description": "A stable public URL for webhooks, with an inbox. No signup, no card, no dashboard.",
   "license": "MIT",
   "type": "module",
+  "author": "LucasX7",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lucas7X7/webhook-gateway-.git"
+  },
+  "homepage": "https://github.com/Lucas7X7/webhook-gateway-#readme",
+  "bugs": {
+    "url": "https://github.com/Lucas7X7/webhook-gateway-/issues"
+  },
   "bin": {
     "hookline": "./src/cli.ts"
   },

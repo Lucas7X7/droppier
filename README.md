@@ -31,7 +31,7 @@
 ```
 
 ```bash
-npx hookline dev
+node src/cli.ts dev
 ```
 
 Every provider gets a URL that survives restarts. Every request that lands there is stored
@@ -54,23 +54,37 @@ SQLite file, no Docker, no database, no migration to run before you can debug so
 
 ## Install
 
+Node 24+ required — hookline uses the built-in `node:sqlite` and runs TypeScript natively, so
+there is **no build step and no runtime dependency**. Nothing to install.
+
 ```bash
-npx hookline dev            # no install step: it runs straight from the package
+git clone https://github.com/Lucas7X7/webhook-gateway-.git
+cd webhook-gateway-
+node src/cli.ts dev
 ```
 
-Node 24+ (it uses the built-in `node:sqlite` and native TypeScript execution — **zero
-dependencies, zero build step**).
+Once it is on npm this becomes `npx hookline dev`, and the repository will be renamed to match
+the package. Until then the clone above is the whole install.
 
 ## Quick start
 
 ```bash
 # 1. start the inbox, get a public URL
-npx hookline dev
+node src/cli.ts dev
 
-# 2. paste that URL into your provider's dashboard, or prove the path locally:
-npx hookline sign --provider stripe --secret whsec_... --body '{"id":"evt_1","type":"charge.succeeded"}'
+# 2. prove the path locally, with a real signature:
+node src/cli.ts sign --provider stripe --secret whsec_... \
+  --body '{"id":"evt_1","type":"charge.succeeded"}' | sh
 
-# 3. open the inbox, hit / to search, j/k to move, r to replay, c to copy a replayable curl
+# 3. open the inbox that dev printed, hit / to search, j/k to move,
+#    r to replay, c to copy a replayable curl
+```
+
+Every command below is written as `hookline <cmd>`; from a clone, run `node src/cli.ts <cmd>`
+or alias it once:
+
+```bash
+alias hookline="node $PWD/src/cli.ts"   # $PWD expands now, so the rest of this file works verbatim
 ```
 
 ## What you get
@@ -100,10 +114,10 @@ event instead of quietly giving you three copies of the same charge.
 `--chaos` deliberately breaks them:
 
 ```bash
-npx hookline replay <id> --chaos strip       # signature removed   -> unverified
-npx hookline replay <id> --chaos truncate    # half a payload      -> invalid
-npx hookline replay <id> --chaos corrupt     # bad signature       -> invalid
-npx hookline replay <id> --chaos delay       # 2s late             -> timeout test
+hookline replay <id> --chaos strip       # signature removed   -> unverified
+hookline replay <id> --chaos truncate    # half a payload      -> invalid
+hookline replay <id> --chaos corrupt     # bad signature       -> invalid
+hookline replay <id> --chaos delay       # 2s late             -> timeout test
 ```
 
 If your handler survives `--chaos` with no double charge, it survives production.
@@ -129,8 +143,8 @@ what is actually free:
 | `none` | — | — | — | local only, for CI and tests |
 
 ```bash
-npx hookline dev --tunnel ssh --name myapp        # https://myapp.localhost.run
-npx hookline dev --tunnel relay --relay-url https://relay.example.com --name myapp
+hookline dev --tunnel ssh --name myapp        # https://myapp.localhost.run
+hookline dev --tunnel relay --relay-url https://relay.example.com --name myapp
 ```
 
 A stable free URL is not free for *someone*: the tunnel has to terminate on a public machine.
@@ -148,7 +162,7 @@ docker run -p 8080:8080 -e RELAY_DOMAIN=relay.example.com -e RELAY_TOKEN=$(opens
 Then point a wildcard certificate at it (see `relay/Caddyfile.example`) and connect:
 
 ```bash
-npx hookline dev --tunnel relay --name myapp \
+hookline dev --tunnel relay --name myapp \
   --relay-url https://relay.example.com \
   --relay-token "$RELAY_TOKEN"
 ```
