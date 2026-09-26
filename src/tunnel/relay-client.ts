@@ -119,6 +119,7 @@ export function connectRelay(options: RelayClientOptions): RelayClient {
     rejectReady = rejectPromise
   })
   let readySettled = false
+  let fatal = false
   const settleReady = (error: Error | null, url?: string): void => {
     if (readySettled) return
     readySettled = true
@@ -155,6 +156,19 @@ export function connectRelay(options: RelayClientOptions): RelayClient {
           res.on('end', () => {
             const detail = Buffer.concat(chunks).toString('utf8')
             options.onLog?.(`  relay said ${status}: ${detail.slice(0, 200)}`)
+            // 4xx here means the relay understood us and said no: wrong token,
+            // name already taken, bad name. Retrying cannot fix any of those,
+            // and a self-hosted relay operator would just watch their log fill
+            // up. Only network failures and 5xx are worth retrying.
+            if (status >= 400 && status < 500) {
+              fatal = true
+              options.onLog?.(
+                status === 401 || status === 403
+                  ? '  not retrying: the relay token is wrong or missing.' +
+                      ' The relay prints its token on startup — pass it with --relay-token.'
+                  : '  not retrying: the relay refused this name. Try another --name.',
+              )
+            }
             settleReady(new Error(`relay refused the connection: ${detail || status}`))
           })
           res.on('error', (error) => {
@@ -240,13 +254,14 @@ export function connectRelay(options: RelayClientOptions): RelayClient {
       if (pingTimer) clearInterval(pingTimer)
       pingTimer = null
       if (closed) return
+      if (fatal) return
       options.onLog?.('  relay link closed by peer')
       scheduleReconnect()
     })
   }
 
   function scheduleReconnect(): void {
-    if (closed || reconnectTimer) return
+    if (closed || fatal || reconnectTimer) return
     attempt++
     const delay = Math.min(30_000, 500 * 2 ** Math.min(attempt, 6))
     options.onLog?.(`  reconnecting to relay in ${Math.round(delay / 100) / 10}s`)

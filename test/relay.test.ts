@@ -164,6 +164,38 @@ function connect(port: number, name: string, token = RELAY_TOKEN): RelayClient {
   return connectRelay({ relayUrl: `http://127.0.0.1:${port}`, name, token })
 }
 
+test('a refused connection is not retried forever', async () => {
+  await withRelay(async ({ port }) => {
+    // Found by running a client against a relay with the wrong token: it kept
+    // reconnecting on a backoff forever (0.5s, 1s, 2s, 4s...) against a relay
+    // that had already said no and never would say yes, spamming the log of
+    // whoever self-hosts the relay.
+    const log: string[] = []
+    const client = connectRelay({
+      relayUrl: `http://127.0.0.1:${port}`,
+      name: 'refused',
+      token: 'wrong-token',
+      onLog: (line) => log.push(line),
+    })
+    try {
+      await assert.rejects(client.ready, /refused/)
+      // 3s covers several backoff rounds at 0.5s/1s/2s.
+      await new Promise((r) => setTimeout(r, 3000))
+      assert.equal(
+        log.filter((line) => line.includes('reconnecting')).length,
+        0,
+        `should not retry, but logged: ${log.join(' | ')}`,
+      )
+      assert.ok(
+        log.some((line) => line.includes('--relay-token')),
+        `should say how to fix it, but logged: ${log.join(' | ')}`,
+      )
+    } finally {
+      client.close()
+    }
+  })
+})
+
 test('relay forwards a request to the connected client and returns its response', async () => {
   await withRelay(async ({ port }) => {
     const client = connect(port, 'demo')

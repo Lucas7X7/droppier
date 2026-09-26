@@ -329,3 +329,44 @@ export function requestJson(
     req.end()
   })
 }
+
+/**
+ * Does this public url actually reach us?
+ *
+ * Found the hard way: the ssh process was still connected, but the tunnel had
+ * already been dropped on the far end and every request to the "public" url
+ * answered 503. Nothing said so. A tool whose only job is to hand you a working
+ * url cannot afford to print one that does not work, quietly, for hours.
+ *
+ * `/_hookline/healthz` is used on purpose: it is served internally and never
+ * stored as an event, so probing does not fill the inbox with our own noise.
+ */
+export function probePublicUrl(url: string, timeoutMs = 8000): Promise<boolean> {
+  return new Promise((resolvePromise) => {
+    let target: URL
+    try {
+      target = new URL('/_hookline/healthz', url)
+    } catch {
+      resolvePromise(false)
+      return
+    }
+    const send = target.protocol === 'https:' ? httpsRequest : httpRequest
+    let settled = false
+    const done = (ok: boolean): void => {
+      if (settled) return
+      settled = true
+      resolvePromise(ok)
+    }
+    const req = send(target, { method: 'GET' }, (res) => {
+      const status = res.statusCode ?? 0
+      res.resume()
+      done(status >= 200 && status < 400)
+    })
+    req.setTimeout(timeoutMs, () => {
+      req.destroy()
+      done(false)
+    })
+    req.on('error', () => done(false))
+    req.end()
+  })
+}

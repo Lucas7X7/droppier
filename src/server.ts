@@ -9,6 +9,7 @@ import { renderIndex, renderShare, renderNotFound } from './public/index.ts'
 
 const INTERNAL_PREFIX = '/_hookline'
 const MAX_BODY_BYTES = 5 * 1024 * 1024
+const NOISE_PATHS = new Set(['/favicon.ico', '/robots.txt'])
 
 export interface ServerDeps {
   config: HooklineConfig
@@ -189,6 +190,16 @@ export function createHooklineServer(deps: ServerDeps): HooklineServer {
       try {
         if (path === INTERNAL_PREFIX || path.startsWith(`${INTERNAL_PREFIX}/`)) {
           await handleInternal(req, res, url, path)
+          return
+        }
+
+        // Any browser that opens the public url asks for these. They are never
+        // webhooks, and storing them fills the inbox with `unknown
+        // /favicon.ico unverified` noise the first time anyone looks at the
+        // page in a browser.
+        if (NOISE_PATHS.has(path)) {
+          res.writeHead(204, { 'cache-control': 'public, max-age=86400' })
+          res.end()
           return
         }
 

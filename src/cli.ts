@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { loadConfig, type HooklineConfig, type TunnelKind } from './config.ts'
 import { openStore } from './store.ts'
 import { createHooklineServer } from './server.ts'
-import { openTunnel, requestJson, tunnelAvailable } from './tunnel/index.ts'
+import { openTunnel, probePublicUrl, requestJson, tunnelAvailable } from './tunnel/index.ts'
 import { signPayload } from './verify.ts'
 import { buildCurl } from './curl.ts'
 import { formatBytes, timeAgo, formatTime } from './public/util.ts'
@@ -108,14 +108,25 @@ function banner(config: HooklineConfig, localUrl: string, tunnel: {
   url: string
   kind: string
   note: string | null
-} | null): void {
+} | null, tunnelError: string | null = null): void {
   const publicUrl = tunnel?.url ?? config.publicUrl ?? localUrl
   const inboxUrl = config.token ? `${localUrl}/_hookline?t=${config.token}` : `${localUrl}/_hookline`
   const lines = [
     '',
     `  ${bold(cyan('hookline'))} ${dim('· inbox for webhooks you can actually debug')}`,
     '',
-    `  ${dim('public  ')} ${green(publicUrl)}`,
+  ]
+  if (tunnel) {
+    lines.push(`  ${dim('public  ')} ${green(publicUrl)}`)
+  } else if (tunnelError) {
+    // Never print a localhost url under the label "public": that is how you
+    // end up pasting http://127.0.0.1 into a provider dashboard and waiting
+    // forever for an event that has nowhere to come from.
+    lines.push(`  ${dim('public  ')} ${amber('none')} ${dim(`· ${tunnelError}`)}`)
+  } else {
+    lines.push(`  ${dim('public  ')} ${green(publicUrl)}`)
+  }
+  lines.push(
     `  ${dim('inbox   ')} ${cyan(inboxUrl)}`,
     `  ${dim('db      ')} ${dim(config.db)}${config.retentionDays ? dim(` (${config.retentionDays}d retention)`) : ''}`,
     `  ${dim('secrets ')} ${
@@ -123,14 +134,22 @@ function banner(config: HooklineConfig, localUrl: string, tunnel: {
         ? Object.keys(config.secrets).map((provider) => purple(provider)).join(dim(', '))
         : dim('none — every event will show as unverified')
     }`,
-  ]
+  )
   if (tunnel) {
     lines.push(`  ${dim('tunnel  ')} ${dim(tunnel.kind)}${tunnel.note ? dim(` · ${tunnel.note}`) : ''}`)
+  } else if (tunnelError) {
+    lines.push(
+      '',
+      `  ${amber('!')} no public url, so nothing can reach this inbox from outside.`,
+      `  ${dim('  fix the tunnel above, or run without one: hookline dev --tunnel none')}`,
+    )
   }
   if (config.tokenGenerated) {
     lines.push('', `  ${amber('!')} a token was generated because a tunnel is public — share it carefully`)
   }
-  lines.push('', `  ${dim('paste the public url into your provider dashboard, then watch it land here')}`, '')
+  if (tunnel) {
+    lines.push('', `  ${dim('paste the public url into your provider dashboard, then watch it land here')}`, '')
+  }
   process.stdout.write(`${lines.join('\n')}\n`)
 }
 
@@ -148,8 +167,10 @@ async function commandDev(args: Args): Promise<void> {
   server.setPublicUrl(localUrl)
 
   let tunnel: Awaited<ReturnType<typeof openTunnel>> = null
+  let tunnelError: string | null = null
   if (config.tunnel !== 'none') {
     if (!tunnelAvailable(config.tunnel)) {
+      tunnelError = `${config.tunnel} is not installed`
       process.stdout.write(
         `  ${amber('!')} ${config.tunnel} tunnel unavailable (missing ${config.tunnel === 'ssh' ? 'ssh' : config.tunnel}); running local only\n`,
       )
@@ -169,15 +190,45 @@ async function commandDev(args: Args): Promise<void> {
           publicUrl.current = tunnel.url
         }
       } catch (error) {
-        process.stdout.write(`  ${amber('!')} tunnel failed: ${(error as Error).message}\n`)
+        tunnelError = (error as Error).message
+        process.stdout.write(`  ${amber('!')} tunnel failed: ${tunnelError}\n`)
       }
     }
   }
 
-  banner(config, localUrl, tunnel ? { url: tunnel.url, kind: tunnel.kind, note: tunnel.note } : null)
+  banner(config, localUrl, tunnel ? { url: tunnel.url, kind: tunnel.kind, note: tunnel.note } : null, tunnelError)
+
+  // A url that does not answer is worse than no url at all, so prove it works
+  // before telling anyone to paste it into a dashboard — and keep checking,
+  // because a tunnel can die while the process that owns it stays alive.
+  let watch: NodeJS.Timeout | null = null
+  if (tunnel) {
+    const url = tunnel.url
+    const warn = (line: string): void => {
+      process.stdout.write(`  ${amber('!')} ${line}\n`)
+    }
+    const alive = await probePublicUrl(url)
+    if (!alive) {
+      warn(`${url} did not answer yet.`)
+      warn('  nothing can reach this inbox until it does. If it stays dead,')
+      warn('  the tunnel was refused upstream — restart dev to get a new url.')
+    } else {
+      watch = setInterval(() => {
+        void probePublicUrl(url).then((ok) => {
+          if (!ok) {
+            warn(`${url} stopped answering. The tunnel is down even though this`)
+            warn('  process is still running: your provider can no longer reach you.')
+            warn('  restart dev to get a new url.')
+          }
+        })
+      }, 60_000)
+      watch.unref()
+    }
+  }
 
   const shutdown = async (): Promise<void> => {
     process.stdout.write(`\n  ${dim('shutting down…')}\n`)
+    if (watch) clearInterval(watch)
     tunnel?.close()
     await server.close()
     store.close()

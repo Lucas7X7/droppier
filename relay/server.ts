@@ -320,7 +320,12 @@ server.listen(PORT, '0.0.0.0', () => {
   else log('relay token: from RELAY_TOKEN')
   log('')
   log(`  point nginx/caddy at :${boundPort} with a wildcard certificate for *.${DOMAIN || 'example.com'}`)
-  log('  then: hookline dev --tunnel relay --relay-url https://relay.example.com --name me')
+  log(
+    '  then: hookline dev --tunnel relay' +
+      ` --relay-url https://relay.example.com --name me --relay-token ${TOKEN}`,
+  )
+  log('')
+  log('  the token is required: a client without it is refused, and says nothing while failing')
   log('')
   if (process.send) process.send({ ready: true, port: boundPort })
 })
