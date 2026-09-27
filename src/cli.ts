@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { loadConfig, type DroppierConfig, type TunnelKind } from './config.ts'
 import { openStore } from './store.ts'
 import { createDroppierServer } from './server.ts'
@@ -63,6 +64,37 @@ function parseArgs(argv: string[]): Args {
 function flagString(args: Args, name: string): string | undefined {
   const value = args.flags[name]
   return typeof value === 'string' ? value : undefined
+}
+
+/**
+ * The version from package.json, walked up to the package root.
+ *
+ * The depth is not fixed: `src/cli.ts` is one level down from the root when
+ * running from a clone, and `dist/src/cli.js` is two in the published tarball.
+ * Searching for the first package.json that is actually this package handles
+ * both without a branch, and keeps the number in one place.
+ */
+function version(): string {
+  let dir = dirname(fileURLToPath(import.meta.url))
+  for (let depth = 0; depth < 5; depth++) {
+    const candidate = resolve(dir, 'package.json')
+    if (existsSync(candidate)) {
+      try {
+        const parsed = JSON.parse(readFileSync(candidate, 'utf8')) as {
+          name?: string
+          version?: string
+        }
+        if (parsed.name === 'droppier' && parsed.version) return parsed.version
+      } catch {
+        // A package.json we cannot read is not the one we are looking for; keep
+        // walking rather than failing a command that only prints a number.
+      }
+    }
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return 'unknown'
 }
 
 function flagNumber(args: Args, name: string): number | undefined {
@@ -444,6 +476,7 @@ ${bold('usage')}
   droppier sign --provider p ...    print a correctly signed curl for any provider
   droppier purge [--all|--before d] delete stored events
   droppier relay                    run the self-hosted public relay
+  droppier version                  print the version
 
 ${bold('common options')}
   --db <path>             sqlite file to read (ls, show, replay, stats, purge)
@@ -505,6 +538,11 @@ async function main(): Promise<void> {
         break
       case 'relay':
         await import('../relay/server.ts')
+        break
+      case 'version':
+      case '--version':
+      case '-v':
+        process.stdout.write(`${version()}\n`)
         break
       case 'help':
       case '--help':
