@@ -87,7 +87,7 @@ test('redaction keeps the command runnable but removes the signature', async () 
     { method: 'POST', path: '/x', query: '', headers, body },
     { url: 'http://127.0.0.1:1', redact: true },
   )
-  assert.match(command, /x-hookline-signature: <redacted>/)
+  assert.match(command, /x-droppier-signature: <redacted>/)
   assert.match(command, /# 1 signature header\(s\) redacted/)
   assert.doesNotMatch(command, /v1=|sha256=[0-9a-f]{8}/)
 })

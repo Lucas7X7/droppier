@@ -1,6 +1,6 @@
-# hookline relay
+# droppier relay
 
-The public half of hookline: a tiny process that owns `*.your-domain` and forwards each request
+The public half of droppier: a tiny process that owns `*.your-domain` and forwards each request
 to whichever dev machine claimed that subdomain.
 
 It exists because a stable public URL has to terminate somewhere, and "somewhere" is the part
@@ -10,7 +10,7 @@ half is one file with no dependencies and a $5 VPS.
 ## How it works
 
 ```
-provider ──https──> relay (public) ──duplex NDJSON──> hookline dev (your laptop) ──> localhost:4000
+provider ──https──> relay (public) ──duplex NDJSON──> droppier dev (your laptop) ──> localhost:4000
 ```
 
 - The client opens `POST /connect?name=<subdomain>` with `Transfer-Encoding: chunked` and never
@@ -102,11 +102,11 @@ With nginx, the equivalent is `proxy_buffering off;` plus `proxy_request_bufferi
 ## Docker
 
 ```bash
-docker build -t hookline-relay -f relay/Dockerfile .
-docker run -d --name hookline-relay -p 8080:8080 \
+docker build -t droppier-relay -f relay/Dockerfile .
+docker run -d --name droppier-relay -p 8080:8080 \
   -e RELAY_DOMAIN=relay.example.com \
   -e RELAY_TOKEN=$(openssl rand -hex 16) \
-  hookline-relay
+  droppier-relay
 ```
 
 The image is `node:24-alpine` and copies only `relay/` and `src/relay-protocol.ts`.

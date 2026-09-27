@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { loadConfig } from '../src/config.ts'
 import { openStore } from '../src/store.ts'
-import { createHooklineServer } from '../src/server.ts'
+import { createDroppierServer } from '../src/server.ts'
 import { signPayload } from '../src/verify.ts'
 
 const SECRET = 'whsec_test_secret'
@@ -17,7 +17,7 @@ interface Harness {
 }
 
 async function harness(overrides: Record<string, unknown> = {}): Promise<Harness> {
-  const dir = mkdtempSync(join(tmpdir(), 'hookline-server-'))
+  const dir = mkdtempSync(join(tmpdir(), 'droppier-server-'))
   const config = loadConfig(
     process.cwd(),
     {
@@ -32,7 +32,7 @@ async function harness(overrides: Record<string, unknown> = {}): Promise<Harness
   )
   const store = openStore(config.db)
   const publicUrl = { current: null as string | null }
-  const server = createHooklineServer({ config, store, publicUrl })
+  const server = createDroppierServer({ config, store, publicUrl })
   const base = await server.listen(0, '127.0.0.1')
   return {
     base,
@@ -59,13 +59,13 @@ test('captures a signed event on any path and reports the verdict', async () => 
       body,
     })
     assert.equal(response.status, 200)
-    assert.equal(response.headers.get('x-hookline-verdict'), 'valid')
-    const id = response.headers.get('x-hookline-id')
+    assert.equal(response.headers.get('x-droppier-verdict'), 'valid')
+    const id = response.headers.get('x-droppier-id')
     assert.ok(id)
 
     const list = (await (
-      await fetch(`${app.base}/_hookline/api/events?limit=10`, {
-        headers: { 'x-hookline-token': app.token },
+      await fetch(`${app.base}/_droppier/api/events?limit=10`, {
+        headers: { 'x-droppier-token': app.token },
       })
     ).json()) as { events: Array<{ id: string; eventType: string; provider: string }> }
     assert.equal(list.events.length, 1)
@@ -87,7 +87,7 @@ test('a tampered signature is stored as invalid instead of being dropped', async
       body,
     })
     assert.equal(response.status, 200)
-    assert.equal(response.headers.get('x-hookline-verdict'), 'invalid')
+    assert.equal(response.headers.get('x-droppier-verdict'), 'invalid')
   } finally {
     await app.close()
   }
@@ -103,10 +103,10 @@ test('retry of the same event id is linked as a duplicate', async () => {
       headers: signed(body),
       body,
     })
-    const id = second.headers.get('x-hookline-id')
+    const id = second.headers.get('x-droppier-id')
     const detail = (await (
-      await fetch(`${app.base}/_hookline/api/events/${id}`, {
-        headers: { 'x-hookline-token': app.token },
+      await fetch(`${app.base}/_droppier/api/events/${id}`, {
+        headers: { 'x-droppier-token': app.token },
       })
     ).json()) as { duplicateOf: string | null }
     assert.ok(detail.duplicateOf)
@@ -121,17 +121,17 @@ test('replay resends the exact bytes and chaos modes mutate them on purpose', as
   try {
     const body = JSON.stringify({ id: 'evt_r', type: 'charge.succeeded', data: { amount: 100 } })
     const first = await fetch(`${app.base}/stripe`, { method: 'POST', headers: signed(body), body })
-    const id = first.headers.get('x-hookline-id')!
-    const auth = { 'x-hookline-token': app.token }
+    const id = first.headers.get('x-droppier-id')!
+    const auth = { 'x-droppier-token': app.token }
 
     const clean = (await (
-      await fetch(`${app.base}/_hookline/api/events/${id}/replay`, { method: 'POST', headers: auth })
+      await fetch(`${app.base}/_droppier/api/events/${id}/replay`, { method: 'POST', headers: auth })
     ).json()) as { event: { id: string; body: string; verdict: string; replayOf: string } }
     assert.equal(clean.event.body, body)
     assert.equal(clean.event.replayOf, id)
 
     const truncated = (await (
-      await fetch(`${app.base}/_hookline/api/events/${id}/replay?chaos=truncate`, {
+      await fetch(`${app.base}/_droppier/api/events/${id}/replay?chaos=truncate`, {
         method: 'POST',
         headers: auth,
       })
@@ -141,7 +141,7 @@ test('replay resends the exact bytes and chaos modes mutate them on purpose', as
     assert.match(truncated.event.note, /truncated/)
 
     const stripped = (await (
-      await fetch(`${app.base}/_hookline/api/events/${id}/replay?chaos=strip`, {
+      await fetch(`${app.base}/_droppier/api/events/${id}/replay?chaos=strip`, {
         method: 'POST',
         headers: auth,
       })
@@ -149,10 +149,10 @@ test('replay resends the exact bytes and chaos modes mutate them on purpose', as
     assert.equal(stripped.event.headers['stripe-signature'], undefined)
     assert.equal(stripped.event.verdict, 'unverified')
 
-    // Regression: `corrupt` used to rewrite only x-hookline-signature, so for a
+    // Regression: `corrupt` used to rewrite only x-droppier-signature, so for a
     // real provider it changed nothing and the replay came back `valid`.
     const corrupted = (await (
-      await fetch(`${app.base}/_hookline/api/events/${id}/replay?chaos=corrupt`, {
+      await fetch(`${app.base}/_droppier/api/events/${id}/replay?chaos=corrupt`, {
         method: 'POST',
         headers: auth,
       })
@@ -166,7 +166,7 @@ test('replay resends the exact bytes and chaos modes mutate them on purpose', as
     assert.equal(corrupted.event.body, body, 'corrupt must not touch the body')
     assert.match(corrupted.event.note, /corrupted/)
 
-    const bad = await fetch(`${app.base}/_hookline/api/events/${id}/replay?chaos=nonsense`, {
+    const bad = await fetch(`${app.base}/_droppier/api/events/${id}/replay?chaos=nonsense`, {
       method: 'POST',
       headers: auth,
     })
@@ -182,22 +182,22 @@ test('the inbox is locked without a token and share pages stay public', async ()
   try {
     const body = JSON.stringify({ id: 'evt_share', type: 'charge.succeeded' })
     const created = await fetch(`${app.base}/stripe`, { method: 'POST', headers: signed(body), body })
-    const id = created.headers.get('x-hookline-id')!
+    const id = created.headers.get('x-droppier-id')!
 
-    assert.equal((await fetch(`${app.base}/_hookline`)).status, 401)
-    assert.equal((await fetch(`${app.base}/_hookline/api/events`)).status, 401)
+    assert.equal((await fetch(`${app.base}/_droppier`)).status, 401)
+    assert.equal((await fetch(`${app.base}/_droppier/api/events`)).status, 401)
     assert.equal(
-      (await fetch(`${app.base}/_hookline/api/events?t=${app.token}`)).status,
+      (await fetch(`${app.base}/_droppier/api/events?t=${app.token}`)).status,
       200,
     )
     assert.equal(
-      (await fetch(`${app.base}/_hookline/api/events`, {
+      (await fetch(`${app.base}/_droppier/api/events`, {
         headers: { authorization: `Bearer ${app.token}` },
       })).status,
       200,
     )
 
-    const share = await fetch(`${app.base}/_hookline/p/${id}`)
+    const share = await fetch(`${app.base}/_droppier/p/${id}`)
     assert.equal(share.status, 200)
     const html = await share.text()
     assert.match(html, /evt_share/)
@@ -205,20 +205,20 @@ test('the inbox is locked without a token and share pages stay public', async ()
     assert.doesNotMatch(html, /v1=[0-9a-f]{16}/, 'public page must not leak the signature')
     assert.match(html, /signature header\(s\) hidden/)
 
-    const raw = await fetch(`${app.base}/_hookline/p/${id}?raw=1&t=${app.token}`)
+    const raw = await fetch(`${app.base}/_droppier/p/${id}?raw=1&t=${app.token}`)
     assert.match(await raw.text(), /stripe-signature/)
 
     const json = (await (
-      await fetch(`${app.base}/_hookline/p/${id}.json`)
+      await fetch(`${app.base}/_droppier/p/${id}.json`)
     ).json()) as { headers: Record<string, string> }
     assert.equal(json.headers['stripe-signature'], '<redacted>')
 
     const rawJson = (await (
-      await fetch(`${app.base}/_hookline/p/${id}.json?raw=1&t=${app.token}`)
+      await fetch(`${app.base}/_droppier/p/${id}.json?raw=1&t=${app.token}`)
     ).json()) as { headers: Record<string, string> }
     assert.match(rawJson.headers['stripe-signature'] ?? '', /^t=\d+,v1=/)
 
-    assert.equal((await fetch(`${app.base}/_hookline/p/deadbeef`)).status, 404)
+    assert.equal((await fetch(`${app.base}/_droppier/p/deadbeef`)).status, 404)
   } finally {
     await app.close()
   }
@@ -229,17 +229,17 @@ test('curl output is replayable and strips secrets by default', async () => {
   try {
     const body = JSON.stringify({ id: 'evt_curl', type: 'charge.succeeded' })
     const created = await fetch(`${app.base}/stripe`, { method: 'POST', headers: signed(body), body })
-    const id = created.headers.get('x-hookline-id')!
+    const id = created.headers.get('x-droppier-id')!
     const redacted = (await (
-      await fetch(`${app.base}/_hookline/api/events/${id}/curl`, {
-        headers: { 'x-hookline-token': app.token },
+      await fetch(`${app.base}/_droppier/api/events/${id}/curl`, {
+        headers: { 'x-droppier-token': app.token },
       })
     ).json()) as { curl: string }
     assert.match(redacted.curl, /<redacted>/)
 
     const raw = (await (
-      await fetch(`${app.base}/_hookline/api/events/${id}/curl?raw=1`, {
-        headers: { 'x-hookline-token': app.token },
+      await fetch(`${app.base}/_droppier/api/events/${id}/curl?raw=1`, {
+        headers: { 'x-droppier-token': app.token },
       })
     ).json()) as { curl: string }
     assert.match(raw.curl, /stripe-signature: t=\d+,v1=/)
@@ -252,9 +252,9 @@ test('curl output is replayable and strips secrets by default', async () => {
 test('escape hatches for probes: __no-store, __status and __delay', async () => {
   const app = await harness()
   try {
-    const auth = { 'x-hookline-token': app.token }
+    const auth = { 'x-droppier-token': app.token }
     const countEvents = async (): Promise<number> =>
-      ((await (await fetch(`${app.base}/_hookline/api/stats`, { headers: auth })).json()) as {
+      ((await (await fetch(`${app.base}/_droppier/api/stats`, { headers: auth })).json()) as {
         total: number
       }).total
 
@@ -283,9 +283,9 @@ test('the __ escape hatches are inert for an unauthenticated caller', async () =
   // request ever being recorded.
   const app = await harness()
   try {
-    const auth = { 'x-hookline-token': app.token }
+    const auth = { 'x-droppier-token': app.token }
     const total = async (): Promise<number> =>
-      ((await (await fetch(`${app.base}/_hookline/api/stats`, { headers: auth })).json()) as {
+      ((await (await fetch(`${app.base}/_droppier/api/stats`, { headers: auth })).json()) as {
         total: number
       }).total
 
@@ -328,7 +328,7 @@ test('the live stream pushes new events to subscribers', async () => {
   const app = await harness()
   try {
     const controller = new AbortController()
-    const stream = await fetch(`${app.base}/_hookline/api/stream?t=${app.token}`, {
+    const stream = await fetch(`${app.base}/_droppier/api/stream?t=${app.token}`, {
       signal: controller.signal,
     })
     assert.equal(stream.headers.get('content-type'), 'text/event-stream; charset=utf-8')
@@ -359,7 +359,7 @@ test('browser noise never lands in the inbox', async () => {
     // Found by opening the public url in a browser: every visit stored an
     // `unknown /favicon.ico unverified` event that nobody sent.
     const stats = async (): Promise<{ total: number; unverified: number }> =>
-      (await (await fetch(`${app.base}/_hookline/api/stats?t=${app.token}`)).json()) as {
+      (await (await fetch(`${app.base}/_droppier/api/stats?t=${app.token}`)).json()) as {
         total: number
         unverified: number
       }
@@ -386,14 +386,14 @@ async function storeHarness(
   overrides: Record<string, unknown> = {},
   retentionSweepMs = 25,
 ): Promise<{ store: ReturnType<typeof openStore>; close: () => Promise<void> }> {
-  const dir = mkdtempSync(join(tmpdir(), 'hookline-retention-'))
+  const dir = mkdtempSync(join(tmpdir(), 'droppier-retention-'))
   const config = loadConfig(
     process.cwd(),
     { db: join(dir, 'inbox.db'), port: 0, token: 'test-token', tunnel: 'none', ...overrides },
     {},
   )
   const store = openStore(config.db)
-  const server = createHooklineServer({
+  const server = createDroppierServer({
     config,
     store,
     publicUrl: { current: null },
@@ -456,7 +456,7 @@ test('retention is enforced on a timer, not just on request', async () => {
 test('retention sweeps the backlog once at startup', async () => {
   // Restarting after being offline for a week should not leave a week of events
   // sitting in the inbox until the first sweep tick.
-  const dir = mkdtempSync(join(tmpdir(), 'hookline-retention-boot-'))
+  const dir = mkdtempSync(join(tmpdir(), 'droppier-retention-boot-'))
   const db = join(dir, 'inbox.db')
   try {
     const first = openStore(db)
@@ -470,7 +470,7 @@ test('retention sweeps the backlog once at startup', async () => {
       {},
     )
     const store = openStore(config.db)
-    const server = createHooklineServer({
+    const server = createDroppierServer({
       config,
       store,
       publicUrl: { current: null },
@@ -504,14 +504,14 @@ test('the retention sweep is torn down with the server', async () => {
   // A leaked interval would keep writing to a closed database (or hold the
   // process open) long after `dev` exits. The store is left open deliberately
   // so a surviving sweep would be observable rather than throwing.
-  const dir = mkdtempSync(join(tmpdir(), 'hookline-retention-stop-'))
+  const dir = mkdtempSync(join(tmpdir(), 'droppier-retention-stop-'))
   const config = loadConfig(
     process.cwd(),
     { db: join(dir, 'inbox.db'), port: 0, token: 'test-token', tunnel: 'none', retentionDays: 7 },
     {},
   )
   const store = openStore(config.db)
-  const server = createHooklineServer({
+  const server = createDroppierServer({
     config,
     store,
     publicUrl: { current: null },

@@ -80,7 +80,7 @@ export function createLocalProxyHandler(
         resolvePromise({
           status: 504,
           headers: { 'content-type': 'text/plain' },
-          body: 'hookline: local server did not respond in time',
+          body: 'droppier: local server did not respond in time',
         })
       }, timeoutMs)
       upstream.on('error', (error) => {
@@ -88,7 +88,7 @@ export function createLocalProxyHandler(
         resolvePromise({
           status: 502,
           headers: { 'content-type': 'text/plain' },
-          body: `hookline: local server unreachable (${error.message})`,
+          body: `droppier: local server unreachable (${error.message})`,
         })
       })
       upstream.on('close', () => clearTimeout(timer))
@@ -102,7 +102,7 @@ const STALL_TIMEOUT_MS = 60_000
 
 export function connectRelay(options: RelayClientOptions): RelayClient {
   const target = new URL(options.relayUrl)
-  const name = options.name ?? `hookline-${Math.random().toString(36).slice(2, 8)}`
+  const name = options.name ?? `droppier-${Math.random().toString(36).slice(2, 8)}`
   const send = target.protocol === 'https:' ? httpsRequest : httpRequest
 
   let handler: RelayHandler | null = null
@@ -223,7 +223,7 @@ export function connectRelay(options: RelayClientOptions): RelayClient {
                 respond({
                   status: 503,
                   headers: { 'content-type': 'text/plain' },
-                  body: 'hookline: no handler attached',
+                  body: 'droppier: no handler attached',
                 })
                 continue
               }
@@ -240,7 +240,7 @@ export function connectRelay(options: RelayClientOptions): RelayClient {
                   respond({
                     status: 500,
                     headers: { 'content-type': 'text/plain' },
-                    body: `hookline relay handler failed: ${error.message}`,
+                    body: `droppier relay handler failed: ${error.message}`,
                   })
                 })
             }

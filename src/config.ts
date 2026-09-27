@@ -5,7 +5,7 @@ import { PROVIDERS, type Provider } from './types.ts'
 
 export type TunnelKind = 'none' | 'ssh' | 'cloudflared' | 'relay'
 
-export interface HooklineConfig {
+export interface DroppierConfig {
   port: number
   host: string
   db: string
@@ -23,13 +23,13 @@ export interface HooklineConfig {
   workdir: string
 }
 
-export const CONFIG_FILENAMES = ['.hookline.json', 'hookline.config.json']
+export const CONFIG_FILENAMES = ['.droppier.json', 'droppier.config.json']
 
 const TUNNEL_KINDS: TunnelKind[] = ['none', 'ssh', 'cloudflared', 'relay']
 
 /**
  * `retentionDays` reaches config from three places that disagree about types:
- * a JSON file (number), `HOOKLINE_RETENTION_DAYS` (string) and `--retention`
+ * a JSON file (number), `DROPIER_RETENTION_DAYS` (string) and `--retention`
  * (number). Normalise once, here, so nothing downstream has to re-check.
  *
  * `undefined` keeps the documented 7-day default; `null` or `0` disables the
@@ -48,12 +48,12 @@ function normalizeRetention(value: unknown): number | null {
   return days > 0 ? days : null
 }
 
-function fromFile(workdir: string): Partial<HooklineConfig> {
+function fromFile(workdir: string): Partial<DroppierConfig> {
   for (const name of CONFIG_FILENAMES) {
     const path = resolve(workdir, name)
     if (!existsSync(path)) continue
     try {
-      const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<HooklineConfig>
+      const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<DroppierConfig>
       return parsed
     } catch (error) {
       throw new Error(`invalid ${name}: ${(error as Error).message}`)
@@ -65,34 +65,34 @@ function fromFile(workdir: string): Partial<HooklineConfig> {
 function fromEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   const secrets: Record<string, string> = {}
   for (const [key, value] of Object.entries(env)) {
-    if (!key.startsWith('HOOKLINE_SECRET_') || !value) continue
-    const provider = key.slice('HOOKLINE_SECRET_'.length).toLowerCase()
+    if (!key.startsWith('DROPIER_SECRET_') || !value) continue
+    const provider = key.slice('DROPIER_SECRET_'.length).toLowerCase()
     secrets[provider] = value
   }
   const out: Record<string, string> = { ...secrets }
-  if (env.HOOKLINE_PORT) out.port = env.HOOKLINE_PORT
-  if (env.HOOKLINE_HOST) out.host = env.HOOKLINE_HOST
-  if (env.HOOKLINE_DB) out.db = env.HOOKLINE_DB
-  if (env.HOOKLINE_TOKEN) out.token = env.HOOKLINE_TOKEN
-  if (env.HOOKLINE_PUBLIC_URL) out.publicUrl = env.HOOKLINE_PUBLIC_URL
-  if (env.HOOKLINE_TOLERANCE_MS) out.toleranceMs = env.HOOKLINE_TOLERANCE_MS
-  if (env.HOOKLINE_TUNNEL) out.tunnel = env.HOOKLINE_TUNNEL
-  if (env.HOOKLINE_TUNNEL_NAME) out.tunnelName = env.HOOKLINE_TUNNEL_NAME
-  if (env.HOOKLINE_RELAY_URL) out.relayUrl = env.HOOKLINE_RELAY_URL
-  if (env.HOOKLINE_RELAY_TOKEN) out.relayToken = env.HOOKLINE_RELAY_TOKEN
-  if (env.HOOKLINE_RETENTION_DAYS) out.retentionDays = env.HOOKLINE_RETENTION_DAYS
-  if (env.HOOKLINE_PLAIN === '1') out.pretty = 'false'
+  if (env.DROPIER_PORT) out.port = env.DROPIER_PORT
+  if (env.DROPIER_HOST) out.host = env.DROPIER_HOST
+  if (env.DROPIER_DB) out.db = env.DROPIER_DB
+  if (env.DROPIER_TOKEN) out.token = env.DROPIER_TOKEN
+  if (env.DROPIER_PUBLIC_URL) out.publicUrl = env.DROPIER_PUBLIC_URL
+  if (env.DROPIER_TOLERANCE_MS) out.toleranceMs = env.DROPIER_TOLERANCE_MS
+  if (env.DROPIER_TUNNEL) out.tunnel = env.DROPIER_TUNNEL
+  if (env.DROPIER_TUNNEL_NAME) out.tunnelName = env.DROPIER_TUNNEL_NAME
+  if (env.DROPIER_RELAY_URL) out.relayUrl = env.DROPIER_RELAY_URL
+  if (env.DROPIER_RELAY_TOKEN) out.relayToken = env.DROPIER_RELAY_TOKEN
+  if (env.DROPIER_RETENTION_DAYS) out.retentionDays = env.DROPIER_RETENTION_DAYS
+  if (env.DROPIER_PLAIN === '1') out.pretty = 'false'
   return out
 }
 
 export function loadConfig(
   workdir: string = process.cwd(),
-  overrides: Partial<HooklineConfig> = {},
+  overrides: Partial<DroppierConfig> = {},
   env: NodeJS.ProcessEnv = process.env,
-): HooklineConfig {
+): DroppierConfig {
   const file = fromFile(workdir)
   const envValues = fromEnv(env)
-  const merged = { ...file, ...envValues, ...overrides } as Partial<HooklineConfig>
+  const merged = { ...file, ...envValues, ...overrides } as Partial<DroppierConfig>
 
   const tunnel = (merged.tunnel ?? 'ssh') as TunnelKind
   if (!TUNNEL_KINDS.includes(tunnel)) {
@@ -118,7 +118,7 @@ export function loadConfig(
   return {
     port: Number(merged.port ?? 4000),
     host: merged.host ?? '127.0.0.1',
-    db: resolve(workdir, merged.db ?? '.hookline/inbox.db'),
+    db: resolve(workdir, merged.db ?? '.droppier/inbox.db'),
     token,
     tokenGenerated,
     publicUrl: merged.publicUrl ?? null,

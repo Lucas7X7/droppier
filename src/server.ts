@@ -1,13 +1,13 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
-import type { HooklineConfig } from './config.ts'
+import type { DroppierConfig } from './config.ts'
 import type { Store, NewEvent } from './store.ts'
 import type { ListQuery, StoredEvent } from './types.ts'
 import { detectProvider, verifySignature } from './verify.ts'
 import { buildCurl, corruptSignatureValue, isSensitiveHeader, isSignatureHeader } from './curl.ts'
 import { renderIndex, renderShare, renderNotFound } from './public/index.ts'
 
-const INTERNAL_PREFIX = '/_hookline'
+const INTERNAL_PREFIX = '/_droppier'
 const MAX_BODY_BYTES = 5 * 1024 * 1024
 const NOISE_PATHS = new Set(['/favicon.ico', '/robots.txt'])
 const DAY_MS = 86_400_000
@@ -15,7 +15,7 @@ const RETENTION_SWEEP_MS = 60 * 60_000
 const MAX_DELAY_MS = 30_000
 
 export interface ServerDeps {
-  config: HooklineConfig
+  config: DroppierConfig
   store: Store
   publicUrl: { current: string | null }
   onIngest?: (event: StoredEvent) => void
@@ -27,7 +27,7 @@ export interface ServerDeps {
   retentionSweepMs?: number
 }
 
-export interface HooklineServer {
+export interface DroppierServer {
   server: Server
   listen(port: number, host: string): Promise<string>
   close(): Promise<void>
@@ -84,7 +84,7 @@ function tokenMatches(expected: string, provided: string | null): boolean {
   return timingSafeEqual(a, b)
 }
 
-function authorized(config: HooklineConfig, url: URL, req: IncomingMessage): boolean {
+function authorized(config: DroppierConfig, url: URL, req: IncomingMessage): boolean {
   if (!config.token) return true
   const fromQuery = url.searchParams.get('t')
   if (fromQuery && tokenMatches(config.token, fromQuery)) return true
@@ -92,7 +92,7 @@ function authorized(config: HooklineConfig, url: URL, req: IncomingMessage): boo
   if (typeof header === 'string' && header.startsWith('Bearer ')) {
     if (tokenMatches(config.token, header.slice('Bearer '.length))) return true
   }
-  const custom = req.headers['x-hookline-token']
+  const custom = req.headers['x-droppier-token']
   if (typeof custom === 'string' && tokenMatches(config.token, custom)) return true
   return false
 }
@@ -135,7 +135,7 @@ function parseListQuery(url: URL): ListQuery {
   return query
 }
 
-export function createHooklineServer(deps: ServerDeps): HooklineServer {
+export function createDroppierServer(deps: ServerDeps): DroppierServer {
   const { config, store, publicUrl } = deps
   const log = deps.log ?? (() => {})
   const streams = new Set<ServerResponse>()
@@ -145,7 +145,7 @@ export function createHooklineServer(deps: ServerDeps): HooklineServer {
    * Enforce the retention window.
    *
    * This used to be config that nothing read: `retentionDays` defaulted to 7,
-   * the banner printed "7d retention" and `hookline purge --before` existed,
+   * the banner printed "7d retention" and `droppier purge --before` existed,
    * but no code path ever deleted anything on its own. On a public URL that is
    * the difference between "stores payloads for a week" and "grows until the
    * disk fills", because ingest is unauthenticated by design and every stored
@@ -244,7 +244,7 @@ export function createHooklineServer(deps: ServerDeps): HooklineServer {
         // writing a second request by hand. They are deliberately inert unless
         // the caller is authorised: this is an unauthenticated endpoint by
         // design, and anyone who can reach the public url could otherwise make
-        // hookline return 500 forever — which is precisely the retry storm the
+        // droppier return 500 forever — which is precisely the retry storm the
         // tool is supposed to make visible — or pin a socket open for 30s.
         // With no token configured (`--tunnel none`, CI) there is nothing to
         // protect, so they stay open for local use.
@@ -275,9 +275,9 @@ export function createHooklineServer(deps: ServerDeps): HooklineServer {
           'cache-control': 'no-store',
         }
         if (event) {
-          headers['x-hookline-id'] = event.id
-          headers['x-hookline-verdict'] = event.verdict
-          headers['x-hookline-provider'] = event.provider
+          headers['x-droppier-id'] = event.id
+          headers['x-droppier-verdict'] = event.verdict
+          headers['x-droppier-provider'] = event.provider
         }
         const payload = event
           ? { ok: true, id: event.id, provider: event.provider, verdict: event.verdict }
@@ -337,11 +337,11 @@ export function createHooklineServer(deps: ServerDeps): HooklineServer {
       sendHtml(
         res,
         401,
-        `<!doctype html><meta charset="utf-8"><title>hookline</title>
+        `<!doctype html><meta charset="utf-8"><title>droppier</title>
 <body style="background:#0b0d10;color:#e6edf3;font:14px ui-monospace,monospace;padding:40px">
 <p>🔒 locked.</p>
 <p>Add your token: <code>?t=YOUR_TOKEN</code>, or send <code>Authorization: Bearer YOUR_TOKEN</code>.</p>
-<p style="color:#8b949e">The token is printed by <code>hookline dev</code> and stored in <code>.hookline.json</code> as <code>token</code>.</p>`,
+<p style="color:#8b949e">The token is printed by <code>droppier dev</code> and stored in <code>.droppier.json</code> as <code>token</code>.</p>`,
       )
       return
     }
@@ -463,7 +463,7 @@ export function createHooklineServer(deps: ServerDeps): HooklineServer {
     }
     if (chaos === 'corrupt') {
       // Corrupt every signature header this event actually carries, whatever the
-      // provider calls it. Only touching x-hookline-signature would silently do
+      // provider calls it. Only touching x-droppier-signature would silently do
       // nothing for stripe/github/slack/svix/shopify/twilio.
       let touched = 0
       for (const name of Object.keys(headers)) {

@@ -13,7 +13,7 @@ import {
 } from '../src/tunnel/relay-client.ts'
 import { loadConfig } from '../src/config.ts'
 import { openStore } from '../src/store.ts'
-import { createHooklineServer } from '../src/server.ts'
+import { createDroppierServer } from '../src/server.ts'
 import { signPayload } from '../src/verify.ts'
 
 const RELAY_TOKEN = 'relay-secret-token'
@@ -72,14 +72,14 @@ async function startRelay(env: Record<string, string> = {}): Promise<Relay> {
 
 test('end to end: a signed provider event travels relay -> local server -> inbox', async () => {
   await withRelay(async ({ port }) => {
-    const dir = mkdtempSync(join(tmpdir(), 'hookline-e2e-'))
+    const dir = mkdtempSync(join(tmpdir(), 'droppier-e2e-'))
     const config = loadConfig(
       process.cwd(),
       { db: join(dir, 'inbox.db'), port: 0, token: 'e2e', secrets: { stripe: 'whsec_e2e' }, tunnel: 'none' },
       {},
     )
     const store = openStore(config.db)
-    const server = createHooklineServer({ config, store, publicUrl: { current: null } })
+    const server = createDroppierServer({ config, store, publicUrl: { current: null } })
     const localUrl = await server.listen(0, '127.0.0.1')
     const localPort = Number(new URL(localUrl).port)
 
@@ -297,7 +297,7 @@ test('requests for an offline subdomain fail fast with a hint', async () => {
     assert.equal(response.status, 502)
     const payload = JSON.parse(response.text) as { error: string; hint: string }
     assert.match(payload.error, /nothing is listening/)
-    assert.match(payload.hint, /hookline dev --tunnel relay --name nobody/)
+    assert.match(payload.hint, /droppier dev --tunnel relay --name nobody/)
 
     const foreign = await post(port, 'not-a-subdomain', '/', '{}')
     assert.equal(foreign.status, 404)

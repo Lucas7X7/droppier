@@ -135,11 +135,11 @@ const state = { events: [], sel: null, tab: 'body', q: '', provider: '', dup: fa
 
 const $ = (sel) => document.querySelector(sel);
 const api = (path) => {
-  const url = new URL('/_hookline' + path, location.origin);
-  return fetch(url, { headers: TOKEN ? { 'x-hookline-token': TOKEN } : {} }).then((r) => r.json());
+  const url = new URL('/_droppier' + path, location.origin);
+  return fetch(url, { headers: TOKEN ? { 'x-droppier-token': TOKEN } : {} }).then((r) => r.json());
 };
-const post = (path) => fetch(new URL('/_hookline' + path, location.origin), {
-  method: 'POST', headers: TOKEN ? { 'x-hookline-token': TOKEN } : {} },
+const post = (path) => fetch(new URL('/_droppier' + path, location.origin), {
+  method: 'POST', headers: TOKEN ? { 'x-droppier-token': TOKEN } : {} },
 ).then((r) => r.json());
 
 function ago(ms) {
@@ -263,7 +263,7 @@ function renderDetail() {
   } else if (state.tab === 'curl') {
     body = '<pre id="curl">' + esc(e.curl || 'loading…') + '</pre>';
   } else {
-    const link = location.origin + '/_hookline/p/' + e.id;
+    const link = location.origin + '/_droppier/p/' + e.id;
     body = '<p>Public, unlisted link to this exact event. <b>Anyone with the link sees the full body</b> — signature headers are stripped unless you also send the token.</p>' +
       '<pre>' + esc(link) + '\n\n' + esc(link + '.json') + '</pre>' +
       '<div class="row" style="margin-top:10px">' +
@@ -274,8 +274,8 @@ function renderDetail() {
   $('#replay').onclick = () => doReplay(null);
   $('#chaos').onclick = () => doReplay(prompt('chaos mode: strip, truncate, mutate, corrupt, delay') || '');
   $('#copycurl').onclick = () => copy(e.curl || '', 'curl');
-  if ($('#copylink')) $('#copylink').onclick = () => copy(location.origin + '/_hookline/p/' + e.id, 'link');
-  if ($('#copyjson')) $('#copyjson').onclick = () => copy(location.origin + '/_hookline/p/' + e.id + '.json', 'json url');
+  if ($('#copylink')) $('#copylink').onclick = () => copy(location.origin + '/_droppier/p/' + e.id, 'link');
+  if ($('#copyjson')) $('#copyjson').onclick = () => copy(location.origin + '/_droppier/p/' + e.id + '.json', 'json url');
   for (const b of document.querySelectorAll('.tabs button')) {
     b.onclick = () => { state.tab = b.dataset.tab; renderDetail(); };
   }
@@ -344,7 +344,7 @@ document.addEventListener('keydown', (ev) => {
   }
 });
 function stream() {
-  const url = new URL('/_hookline/api/stream', location.origin);
+  const url = new URL('/_droppier/api/stream', location.origin);
   if (TOKEN) url.searchParams.set('t', TOKEN);
   const es = new EventSource(url);
   es.addEventListener('event', (msg) => {
@@ -374,12 +374,12 @@ export function renderIndex(context: IndexContext): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>hookline</title>
+<title>droppier</title>
 <style>${STYLE}</style>
 </head>
 <body>
 <header>
-  <span class="brand"><span class="dot" id="live"></span> hookline</span>
+  <span class="brand"><span class="dot" id="live"></span> droppier</span>
   <span class="url" title="click to copy">
     <span class="label">public</span>
     <span class="value" id="pub">${escapeHtml(context.publicUrl)}</span>
@@ -445,7 +445,7 @@ export function renderShare(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>${escapeHtml(event.provider)} · ${escapeHtml(event.eventType || event.path)} · hookline</title>
+<title>${escapeHtml(event.provider)} · ${escapeHtml(event.eventType || event.path)} · droppier</title>
 <style>${STYLE}
 main { display: block; height: auto; max-width: 1000px; margin: 0 auto; padding: 20px 14px 60px; }
 h1 { font-size: 15px; margin: 0 0 4px; }

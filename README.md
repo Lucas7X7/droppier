@@ -1,13 +1,13 @@
-# hookline
+# droppier
 
 **A stable public URL for webhooks, with an inbox. No signup, no card, no dashboard to configure.**
 
 <!-- Paste a real recording of `bash scripts/demo.sh` here when you publish. -->
 ```
-· hookline dev --tunnel none --port 4999
-  hookline · inbox for webhooks you can actually debug
+· droppier dev --tunnel none --port 4999
+  droppier · inbox for webhooks you can actually debug
   public   http://127.0.0.1:4999
-  inbox    http://127.0.0.1:4999/_hookline?t=devdemo
+  inbox    http://127.0.0.1:4999/_droppier?t=devdemo
 
 · a real signed request arrives
   {"ok":true,"id":"0muhlt5dxkow9ol","provider":"stripe","verdict":"valid"}
@@ -20,18 +20,18 @@
 · someone tampers with the payload in transit
   -> 200 OK (so the provider stops retrying), stored as invalid
 
-· hookline ls
+· droppier ls
   id                     age  time   provider event                       verdict     marks      size
   0muhlt5ndokclik    2s 19:40:37 stripe  charge.succeeded             invalid    dup ·     61B
   0muhlt5jsqkgbbk    2s 19:40:37 stripe  charge.succeeded             valid      dup ·     59B
   0muhlt5dxkow9ol    2s 19:40:37 stripe  charge.succeeded             valid      · ·     59B
 
-· hookline replay <id> --chaos corrupt
+· droppier replay <id> --chaos corrupt
   replayed 0muhlt5jsqkgbbk chaos:corrupt → 0muhlt5p2xk9vv3 (verdict invalid)
 ```
 
 ```bash
-npx hookline dev
+npx droppier dev
 ```
 
 Every provider gets a URL that survives restarts. Every request that lands there is stored
@@ -49,24 +49,24 @@ Webhook development is three tools that don't talk to each other:
 | a place to look at payloads | webhook.site, requestbin | a second website, a second account, no relation to your app |
 | proof it was signed | your own `crypto.timingSafeEqual` ritual | copy-pasted per provider, untested, breaks silently on key rotation |
 
-hookline is one process that does all three, and it is a dev tool: a single Node process, one
+droppier is one process that does all three, and it is a dev tool: a single Node process, one
 SQLite file, no Docker, no database, no migration to run before you can debug something.
 
 ## Install
 
-Node 24+ required — hookline uses the built-in `node:sqlite`, and has **no runtime dependency**.
+Node 24+ required — droppier uses the built-in `node:sqlite`, and has **no runtime dependency**.
 Nothing to install.
 
 ```bash
-npx hookline dev
+npx droppier dev
 ```
 
-To work on hookline itself, clone and run the source directly — Node executes the TypeScript
+To work on droppier itself, clone and run the source directly — Node executes the TypeScript
 natively, so the clone needs no build either:
 
 ```bash
-git clone https://github.com/Lucas7X7/hookline.git
-cd hookline
+git clone https://github.com/Lucas7X7/droppier.git
+cd droppier
 node src/cli.ts dev
 ```
 
@@ -74,21 +74,21 @@ node src/cli.ts dev
 
 ```bash
 # 1. start the inbox, get a public URL
-hookline dev
+droppier dev
 
 # 2. prove the path locally, with a real signature:
-hookline sign --provider stripe --secret whsec_... \
+droppier sign --provider stripe --secret whsec_... \
   --body '{"id":"evt_1","type":"charge.succeeded"}' | sh
 
 # 3. open the inbox that dev printed, hit / to search, j/k to move,
 #    r to replay, c to copy a replayable curl
 ```
 
-Every command below is written as `hookline <cmd>`; from a clone, alias it once so the rest of
+Every command below is written as `droppier <cmd>`; from a clone, alias it once so the rest of
 this file works verbatim:
 
 ```bash
-alias hookline="node $PWD/src/cli.ts"   # $PWD expands now, so this survives a cd
+alias droppier="node $PWD/src/cli.ts"   # $PWD expands now, so this survives a cd
 ```
 
 ## What you get
@@ -104,24 +104,24 @@ checked against the real scheme — including the parts people get wrong:
 | svix | base64 over `id.ts.body` | `whsec_` secrets are base64-decoded, not used raw |
 | shopify | base64 body HMAC | dedupes on `x-shopify-webhook-id` |
 | twilio | sha1 over url + sorted params | needs `--public-url`, otherwise stays `unverified` instead of guessing |
-| generic | `x-hookline-signature` | for your own endpoints, with the same tolerance rules |
+| generic | `x-droppier-signature` | for your own endpoints, with the same tolerance rules |
 
 Four verdicts, not two: `valid`, `invalid`, `stale` (correct signature, but the timestamp is
 outside the window or unreadable — a real replay attack signal) and `unverified` (no secret
 configured). A tampered payload is **stored and flagged**, never dropped, because "the webhook
 arrived and I couldn't read it" is exactly the thing you're debugging at 2am.
 
-**Retries are visible.** Providers retry on non-2xx. hookline links each retry to the original
+**Retries are visible.** Providers retry on non-2xx. droppier links each retry to the original
 event instead of quietly giving you three copies of the same charge.
 
 **Replay, and prove your handler is idempotent.** `replay` re-sends the exact bytes and headers.
 `--chaos` deliberately breaks them:
 
 ```bash
-hookline replay <id> --chaos strip       # signature removed   -> unverified
-hookline replay <id> --chaos truncate    # half a payload      -> invalid
-hookline replay <id> --chaos corrupt     # bad signature       -> invalid
-hookline replay <id> --chaos delay       # 2s late             -> timeout test
+droppier replay <id> --chaos strip       # signature removed   -> unverified
+droppier replay <id> --chaos truncate    # half a payload      -> invalid
+droppier replay <id> --chaos corrupt     # bad signature       -> invalid
+droppier replay <id> --chaos delay       # 2s late             -> timeout test
 ```
 
 If your handler survives `--chaos` with no double charge, it survives production.
@@ -131,8 +131,8 @@ whatever URL you already send:
 
 | parameter | effect |
 | --- | --- |
-| `__status=503` | hookline answers that status instead of 200 |
-| `__delay=2000` | hookline stalls before answering (capped at 30s) |
+| `__status=503` | droppier answers that status instead of 200 |
+| `__delay=2000` | droppier stalls before answering (capped at 30s) |
 | `__no-store=1` | answer 200 without recording anything |
 
 These are **ignored unless the request carries your token** (or you are running `--tunnel none`,
@@ -142,10 +142,10 @@ provider — or pin a socket open. Your provider's real requests never send the 
 unaffected.
 
 **Share the evidence, not a screenshot.** Every event has a public, unlisted page
-(`/_hookline/p/<id>`, and `.json` for the raw record). Signature headers are stripped from that
+(`/_droppier/p/<id>`, and `.json` for the raw record). Signature headers are stripped from that
 page unless you also pass the token, so it's safe to paste in an issue or a Slack thread.
 
-**A curl that actually works.** `hookline show <id>` and the inbox's `c` key print the exact
+**A curl that actually works.** `droppier show <id>` and the inbox's `c` key print the exact
 request, shell-quoted, ready to re-run. It's a tested command, not a template — there's a test
 that pipes it through `sh` and asserts the request that comes out the other side.
 
@@ -162,8 +162,8 @@ what is actually free:
 | `none` | — | — | — | local only, for CI and tests |
 
 ```bash
-hookline dev --tunnel ssh --name myapp        # https://myapp.localhost.run
-hookline dev --tunnel relay --relay-url https://relay.example.com --name myapp
+droppier dev --tunnel ssh --name myapp        # https://myapp.localhost.run
+droppier dev --tunnel relay --relay-url https://relay.example.com --name myapp
 ```
 
 A stable free URL is not free for *someone*: the tunnel has to terminate on a public machine.
@@ -174,14 +174,14 @@ expiring your URL.
 ## Self-hosting the relay
 
 ```bash
-docker build -t hookline-relay -f relay/Dockerfile .
-docker run -p 8080:8080 -e RELAY_DOMAIN=relay.example.com -e RELAY_TOKEN=$(openssl rand -hex 16) hookline-relay
+docker build -t droppier-relay -f relay/Dockerfile .
+docker run -p 8080:8080 -e RELAY_DOMAIN=relay.example.com -e RELAY_TOKEN=$(openssl rand -hex 16) droppier-relay
 ```
 
 Then point a wildcard certificate at it (see `relay/Caddyfile.example`) and connect:
 
 ```bash
-hookline dev --tunnel relay --name myapp \
+droppier dev --tunnel relay --name myapp \
   --relay-url https://relay.example.com \
   --relay-token "$RELAY_TOKEN"
 ```
@@ -192,32 +192,32 @@ timeout, stale connections reaped. See `relay/README.md`.
 ## CLI
 
 ```
-hookline dev [options]      start the inbox and expose a public URL
-hookline ls                 list captured events (ids can be abbreviated)
-hookline show <id>          one event, its headers, a replayable curl and a share link
-hookline replay <id>        re-send an event, optionally with --chaos
-hookline sign               print a correctly signed curl for any provider
-hookline stats              counts by provider, duplicates, invalid signatures
-hookline purge              delete stored events (--all or --before 2026-01-01)
-hookline relay              run the self-hosted relay
+droppier dev [options]      start the inbox and expose a public URL
+droppier ls                 list captured events (ids can be abbreviated)
+droppier show <id>          one event, its headers, a replayable curl and a share link
+droppier replay <id>        re-send an event, optionally with --chaos
+droppier sign               print a correctly signed curl for any provider
+droppier stats              counts by provider, duplicates, invalid signatures
+droppier purge              delete stored events (--all or --before 2026-01-01)
+droppier relay              run the self-hosted relay
 ```
 
-`hookline dev --help` lists every flag. Config also comes from `.hookline.json` (gitignored) or
-`HOOKLINE_*` env vars; see `examples/hookline.json`.
+`droppier dev --help` lists every flag. Config also comes from `.droppier.json` (gitignored) or
+`DROPIER_*` env vars; see `examples/droppier.json`.
 
 ## Using it as a library
 
 The server is three functions; nothing about it requires the CLI.
 
 ```ts
-import { loadConfig } from 'hookline/src/config.ts'
-import { openStore } from 'hookline/src/store.ts'
-import { createHooklineServer } from 'hookline/src/server.ts'
-import { verifySignature } from 'hookline/src/verify.ts'
+import { loadConfig } from 'droppier/src/config.ts'
+import { openStore } from 'droppier/src/store.ts'
+import { createDroppierServer } from 'droppier/src/server.ts'
+import { verifySignature } from 'droppier/src/verify.ts'
 
 const config = loadConfig(process.cwd(), { port: 4000, secrets: { stripe: process.env.STRIPE_SECRET! } })
 const store = openStore(config.db)
-const server = createHooklineServer({ config, store, publicUrl: { current: null } })
+const server = createDroppierServer({ config, store, publicUrl: { current: null } })
 await server.listen(config.port, config.host)
 ```
 
@@ -226,8 +226,8 @@ implementation of the seven schemes above, with no dependencies.
 
 ## Security posture
 
-- **The inbox is locked by default when a tunnel is open.** hookline generates a token and prints
-  it; every `/api/*` and UI request needs it (`?t=`, `Authorization: Bearer`, or `x-hookline-token`).
+- **The inbox is locked by default when a tunnel is open.** droppier generates a token and prints
+  it; every `/api/*` and UI request needs it (`?t=`, `Authorization: Bearer`, or `x-droppier-token`).
 - **Public share pages redact signature headers** unless you pass both `?raw=1` and the token.
   Bodies are *not* redacted — a share link shows the full payload, so treat it like the payload.
 - **Retention is enforced automatically**, every hour and once at startup: events older than

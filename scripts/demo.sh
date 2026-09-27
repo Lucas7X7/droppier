@@ -22,7 +22,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-step "hookline dev --tunnel none --port $PORT"
+step "droppier dev --tunnel none --port $PORT"
 LOG="$(mktemp)"
 node src/cli.ts dev --tunnel none --port "$PORT" --db "$DB" \
   --secret "$SECRET" --provider stripe --token devdemo >"$LOG" 2>&1 &
@@ -35,12 +35,12 @@ done
 sed -n '1,5p' "$LOG"
 
 step "a real signed request arrives"
-node src/cli.ts sign --provider stripe --secret "$SECRET" --body "$BODY" --url "http://127.0.0.1:$PORT/stripe" >/tmp/hookline-demo-curl.sh
-printf '  %s\n' "$(sh /tmp/hookline-demo-curl.sh)"
+node src/cli.ts sign --provider stripe --secret "$SECRET" --body "$BODY" --url "http://127.0.0.1:$PORT/stripe" >/tmp/droppier-demo-curl.sh
+printf '  %s\n' "$(sh /tmp/droppier-demo-curl.sh)"
 echo "  -> 200 OK, signature verified"
 
 step "the provider retries it (same event id, same signature)"
-printf '  %s\n' "$(sh /tmp/hookline-demo-curl.sh)"
+printf '  %s\n' "$(sh /tmp/droppier-demo-curl.sh)"
 echo "  -> linked as a duplicate, not stored as a second charge"
 
 step "someone tampers with the payload in transit"
@@ -50,7 +50,7 @@ curl -sS --no-progress-meter -o /dev/null -X POST "http://127.0.0.1:$PORT/stripe
   -d '{"id":"evt_demo_1","type":"charge.succeeded","amount":999999}'
 echo "  -> 200 OK (so the provider stops retrying), stored as invalid"
 
-step "hookline ls"
+step "droppier ls"
 node src/cli.ts ls --db "$DB"
 
 ID="$(node src/cli.ts ls --db "$DB" --json | node -e '
@@ -63,19 +63,19 @@ ID="$(node src/cli.ts ls --db "$DB" --json | node -e '
   });
 ')"
 
-step "hookline show $ID"
+step "droppier show $ID"
 node src/cli.ts show "$ID" --db "$DB" --port "$PORT"
 
-step "hookline replay $ID --chaos corrupt"
+step "droppier replay $ID --chaos corrupt"
 node src/cli.ts replay "$ID" --chaos corrupt --db "$DB" --port "$PORT" --token devdemo
 
-step "hookline stats"
+step "droppier stats"
 node src/cli.ts stats --db "$DB" --port "$PORT"
 
 step "the share link a teammate can open (no token needed)"
-echo "  http://127.0.0.1:$PORT/_hookline/p/$ID"
-echo "  http://127.0.0.1:$PORT/_hookline/p/$ID.json"
+echo "  http://127.0.0.1:$PORT/_droppier/p/$ID"
+echo "  http://127.0.0.1:$PORT/_droppier/p/$ID.json"
 echo
-echo "inbox:  http://127.0.0.1:$PORT/_hookline?t=devdemo"
+echo "inbox:  http://127.0.0.1:$PORT/_droppier?t=devdemo"
 echo
-echo "re-run any of it:  hookline replay $ID --chaos strip"
+echo "re-run any of it:  droppier replay $ID --chaos strip"

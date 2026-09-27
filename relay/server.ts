@@ -110,7 +110,7 @@ class TokenBucket {
   #updatedAt = Date.now()
 
   // Fields are declared and assigned by hand rather than as constructor
-  // parameter properties: hookline runs TypeScript by stripping types, and
+  // parameter properties: droppier runs TypeScript by stripping types, and
   // stripping cannot erase a parameter property because it has to emit an
   // assignment. Node refuses the file outright.
   constructor(capacity: number, refillPerSecond: number) {
@@ -706,7 +706,7 @@ const server = createServer((req, res) => {
       sendJson(res, 502, {
         ok: false,
         error: `nothing is listening on ${name} right now`,
-        hint: 'start `hookline dev --tunnel relay --name ' + name + ' --relay-url …`',
+        hint: 'start `droppier dev --tunnel relay --name ' + name + ' --relay-url …`',
       })
       return
     }
@@ -796,14 +796,14 @@ setInterval(() => {
 server.listen(PORT, '0.0.0.0', () => {
   const address = server.address()
   const boundPort = typeof address === 'object' && address ? address.port : PORT
-  log('hookline relay listening on :' + boundPort)
+  log('droppier relay listening on :' + boundPort)
   log(`domain: ${DOMAIN || '(none — set RELAY_DOMAIN=relay.example.com behind a wildcard cert)'}`)
   if (!TOKEN_FROM_ENV) log(`relay token (generated, save it): ${TOKEN}`)
   else log('relay token: from RELAY_TOKEN')
   log('')
   log(`  point nginx/caddy at :${boundPort} with a wildcard certificate for *.${DOMAIN || 'example.com'}`)
   log(
-    '  then: hookline dev --tunnel relay' +
+    '  then: droppier dev --tunnel relay' +
       ` --relay-url https://relay.example.com --name me --relay-token ${TOKEN}`,
   )
   log('')

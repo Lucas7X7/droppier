@@ -1,20 +1,20 @@
 {
-  "name": "hookline",
+  "name": "droppier",
   "version": "0.1.0",
   "description": "A stable public URL for webhooks, with an inbox. No signup, no card, no dashboard.",
   "license": "MIT",
   "type": "module",
-  "author": "LucasX7",
+  "author": "lucas7x7",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Lucas7X7/hookline.git"
+    "url": "git+https://github.com/Lucas7X7/droppier.git"
   },
-  "homepage": "https://github.com/Lucas7X7/hookline#readme",
+  "homepage": "https://github.com/Lucas7X7/droppier#readme",
   "bugs": {
-    "url": "https://github.com/Lucas7X7/hookline/issues"
+    "url": "https://github.com/Lucas7X7/droppier/issues"
   },
   "bin": {
-    "hookline": "./dist/src/cli.js"
+    "droppier": "./dist/src/cli.js"
   },
   "engines": {
     "node": ">=24"

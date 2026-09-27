@@ -23,7 +23,7 @@ test('dev --help prints usage instead of opening a tunnel', async () => {
   const { code, stdout } = await cli(['dev', '--help'], 10_000)
   assert.equal(code, 0)
   assert.match(stdout, /usage/)
-  assert.match(stdout, /hookline dev \[options\]/)
+  assert.match(stdout, /droppier dev \[options\]/)
   assert.doesNotMatch(stdout, /localhost\.run/)
 })
 

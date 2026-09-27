@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { loadConfig, type HooklineConfig, type TunnelKind } from './config.ts'
+import { loadConfig, type DroppierConfig, type TunnelKind } from './config.ts'
 import { openStore } from './store.ts'
-import { createHooklineServer } from './server.ts'
+import { createDroppierServer } from './server.ts'
 import { openTunnel, probePublicUrl, requestJson, tunnelAvailable } from './tunnel/index.ts'
 import { signPayload } from './verify.ts'
 import { buildCurl } from './curl.ts'
@@ -35,7 +35,7 @@ interface Args {
 
 function parseArgs(argv: string[]): Args {
   const [command = 'help', ...rest] = argv
-  // `hookline dev --help` must print help, not start a tunnel. Checked before
+  // `droppier dev --help` must print help, not start a tunnel. Checked before
   // anything is parsed, because `dev` is the command most likely to be probed.
   if (rest.includes('--help') || rest.includes('-h')) {
     return { command: 'help', flags: {}, positional: [] }
@@ -72,8 +72,8 @@ function flagNumber(args: Args, name: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined
 }
 
-function configFrom(args: Args): HooklineConfig {
-  const overrides: Partial<HooklineConfig> = {}
+function configFrom(args: Args): DroppierConfig {
+  const overrides: Partial<DroppierConfig> = {}
   const port = flagNumber(args, 'port')
   if (port !== undefined) overrides.port = port
   const host = flagString(args, 'host')
@@ -104,16 +104,16 @@ function configFrom(args: Args): HooklineConfig {
   return loadConfig(process.cwd(), overrides)
 }
 
-function banner(config: HooklineConfig, localUrl: string, tunnel: {
+function banner(config: DroppierConfig, localUrl: string, tunnel: {
   url: string
   kind: string
   note: string | null
 } | null, tunnelError: string | null = null): void {
   const publicUrl = tunnel?.url ?? config.publicUrl ?? localUrl
-  const inboxUrl = config.token ? `${localUrl}/_hookline?t=${config.token}` : `${localUrl}/_hookline`
+  const inboxUrl = config.token ? `${localUrl}/_droppier?t=${config.token}` : `${localUrl}/_droppier`
   const lines = [
     '',
-    `  ${bold(cyan('hookline'))} ${dim('· inbox for webhooks you can actually debug')}`,
+    `  ${bold(cyan('droppier'))} ${dim('· inbox for webhooks you can actually debug')}`,
     '',
   ]
   if (tunnel) {
@@ -145,7 +145,7 @@ function banner(config: HooklineConfig, localUrl: string, tunnel: {
     lines.push(
       '',
       `  ${amber('!')} no public url, so nothing can reach this inbox from outside.`,
-      `  ${dim('  fix the tunnel above, or run without one: hookline dev --tunnel none')}`,
+      `  ${dim('  fix the tunnel above, or run without one: droppier dev --tunnel none')}`,
     )
   }
   if (config.tokenGenerated) {
@@ -161,7 +161,7 @@ async function commandDev(args: Args): Promise<void> {
   const config = configFrom(args)
   const store = openStore(config.db)
   const publicUrl = { current: config.publicUrl }
-  const server = createHooklineServer({
+  const server = createDroppierServer({
     config,
     store,
     publicUrl,
@@ -242,7 +242,7 @@ async function commandDev(args: Args): Promise<void> {
   process.on('SIGTERM', () => void shutdown())
 }
 
-function openLocalStore(config: HooklineConfig) {
+function openLocalStore(config: DroppierConfig) {
   return openStore(config.db)
 }
 
@@ -291,14 +291,14 @@ function commandLs(args: Args): void {
     `${dim('  id                     age  time   provider event                       verdict     marks      size\n')}`,
   )
   for (const event of events) process.stdout.write(`  ${eventRow(event, now)}\n`)
-  if (events.length === 0) process.stdout.write(`  ${dim('inbox is empty — start `hookline dev`')}\n`)
+  if (events.length === 0) process.stdout.write(`  ${dim('inbox is empty — start `droppier dev`')}\n`)
   store.close()
 }
 
 function commandShow(args: Args): void {
   const config = configFrom(args)
   const input = args.positional[0]
-  if (!input) throw new Error('usage: hookline show <id>')
+  if (!input) throw new Error('usage: droppier show <id>')
   const store = openLocalStore(config)
   const id = store.resolveId(input) ?? input
   const event = store.get(id)
@@ -325,7 +325,7 @@ function commandShow(args: Args): void {
   if (event.duplicateOf) rows.push(['duplicate of', event.duplicateOf])
   if (event.replayOf) rows.push(['replay of', event.replayOf])
   if (event.note) rows.push(['note', event.note])
-  rows.push(['share', `${publicUrl}/_hookline/p/${event.id}`])
+  rows.push(['share', `${publicUrl}/_droppier/p/${event.id}`])
   for (const [label, value] of rows) {
     process.stdout.write(`  ${dim(label.padEnd(12))} ${value}\n`)
   }
@@ -346,10 +346,10 @@ function commandShow(args: Args): void {
 async function commandReplay(args: Args): Promise<void> {
   const config = configFrom(args)
   const id = args.positional[0]
-  if (!id) throw new Error('usage: hookline replay <id> [--chaos strip|truncate|mutate|corrupt|delay]')
+  if (!id) throw new Error('usage: droppier replay <id> [--chaos strip|truncate|mutate|corrupt|delay]')
   const base = flagString(args, 'url') ?? `http://${config.host}:${config.port}`
   const chaos = flagString(args, 'chaos')
-  const path = `/_hookline/api/events/${id}/replay${chaos ? `?chaos=${chaos}` : ''}`
+  const path = `/_droppier/api/events/${id}/replay${chaos ? `?chaos=${chaos}` : ''}`
   const result = (await requestJson(`${base}${path}`, {
     method: 'POST',
     token: config.token,
@@ -433,17 +433,17 @@ function commandSign(args: Args): void {
   )
 }
 
-const HELP = `${bold('hookline')} ${dim('· a stable public URL for webhooks, with an inbox')}
+const HELP = `${bold('droppier')} ${dim('· a stable public URL for webhooks, with an inbox')}
 
 ${bold('usage')}
-  hookline dev [options]            start the inbox and expose a public URL
-  hookline ls [options]             list captured events
-  hookline show <id>                print one event, its headers and a replayable curl
-  hookline replay <id> [--chaos m]  re-send an event, optionally mutated
-  hookline stats                    counts by provider, duplicates, invalid signatures
-  hookline sign --provider p ...    print a correctly signed curl for any provider
-  hookline purge [--all|--before d] delete stored events
-  hookline relay                    run the self-hosted public relay
+  droppier dev [options]            start the inbox and expose a public URL
+  droppier ls [options]             list captured events
+  droppier show <id>                print one event, its headers and a replayable curl
+  droppier replay <id> [--chaos m]  re-send an event, optionally mutated
+  droppier stats                    counts by provider, duplicates, invalid signatures
+  droppier sign --provider p ...    print a correctly signed curl for any provider
+  droppier purge [--all|--before d] delete stored events
+  droppier relay                    run the self-hosted public relay
 
 ${bold('common options')}
   --db <path>             sqlite file to read (ls, show, replay, stats, purge)
@@ -456,7 +456,7 @@ ${bold('common options')}
 
 ${bold('dev options')}
   --port <n>              local port (default 4000)
-  --db <path>             sqlite file (default .hookline/inbox.db)
+  --db <path>             sqlite file (default .droppier/inbox.db)
   --tunnel <kind>         none | ssh | cloudflared | relay   (default ssh)
   --name <subdomain>      claim a sticky subdomain (ssh) or relay name
   --relay-url <url>       relay base url, required for --tunnel relay
@@ -469,12 +469,12 @@ ${bold('dev options')}
   --token <value>         ui/api token; generated automatically when a tunnel is on
 
 ${bold('environment')}
-  HOOKLINE_PORT, HOOKLINE_TOKEN, HOOKLINE_DB, HOOKLINE_PUBLIC_URL, HOOKLINE_TUNNEL,
-  HOOKLINE_TUNNEL_NAME, HOOKLINE_RELAY_URL, HOOKLINE_RELAY_TOKEN, HOOKLINE_RETENTION_DAYS,
-  HOOKLINE_SECRET_<PROVIDER>   e.g. HOOKLINE_SECRET_STRIPE=whsec_…
+  DROPIER_PORT, DROPIER_TOKEN, DROPIER_DB, DROPIER_PUBLIC_URL, DROPIER_TUNNEL,
+  DROPIER_TUNNEL_NAME, DROPIER_RELAY_URL, DROPIER_RELAY_TOKEN, DROPIER_RETENTION_DAYS,
+  DROPIER_SECRET_<PROVIDER>   e.g. DROPIER_SECRET_STRIPE=whsec_…
 
 ${bold('config')}
-  .hookline.json in the project root, gitignored by default. See examples/hookline.json.
+  .droppier.json in the project root, gitignored by default. See examples/droppier.json.
 `
 
 async function main(): Promise<void> {

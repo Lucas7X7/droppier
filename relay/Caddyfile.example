@@ -1,7 +1,7 @@
-# Caddy configuration for the hookline relay.
+# Caddy configuration for the droppier relay.
 #
 #   1. caddy run --config relay/Caddyfile.example
-#   2. hookline dev --tunnel relay --relay-url https://relay.example.com \
+#   2. droppier dev --tunnel relay --relay-url https://relay.example.com \
 #        --name myapp --relay-token "$RELAY_TOKEN"
 #
 # A wildcard subdomain (myapp.relay.example.com) needs a wildcard certificate.

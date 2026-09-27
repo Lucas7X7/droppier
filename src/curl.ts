@@ -1,7 +1,7 @@
 import type { StoredEvent } from './types.ts'
 
 const SIGNATURE_HEADERS = new Set([
-  'x-hookline-signature',
+  'x-droppier-signature',
   'stripe-signature',
   'x-hub-signature',
   'x-hub-signature-256',
@@ -15,7 +15,7 @@ const SENSITIVE_HEADERS = new Set([
   'authorization',
   'cookie',
   'set-cookie',
-  'x-hookline-token',
+  'x-droppier-token',
   ...SIGNATURE_HEADERS,
 ])
 

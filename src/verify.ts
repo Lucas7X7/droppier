@@ -30,7 +30,7 @@ export function detectProvider(headers: Record<string, string>): Provider {
   if (headers['svix-id'] || headers['svix-signature']) return 'svix'
   if (headers['x-twilio-signature']) return 'twilio'
   if (headers['x-shopify-hmac-sha256']) return 'shopify'
-  if (headers['x-hookline-signature']) return 'generic'
+  if (headers['x-droppier-signature']) return 'generic'
   return 'unknown'
 }
 
@@ -236,8 +236,8 @@ export function verifySignature(options: VerifyOptions): VerifyResult {
 
     case 'generic': {
       if (!secret) return unverified('no secret configured for generic')
-      const header = headers['x-hookline-signature'] ?? ''
-      const timestamp = headers['x-hookline-timestamp']
+      const header = headers['x-droppier-signature'] ?? ''
+      const timestamp = headers['x-droppier-timestamp']
       const signature = header.replace(/^(sha256=)?/, '')
       const data = timestamp ? `${timestamp}.${rawBody}` : rawBody
       const age = timestampAge(timestamp, toleranceMs, now)
@@ -279,7 +279,7 @@ export function signPayload(options: SignOptions): Record<string, string> {
         'x-github-event': 'push',
         'x-github-delivery': id,
         'x-hub-signature-256': `sha256=${hmacHex(secret, rawBody)}`,
-        'user-agent': 'GitHub-Hookshot/hookline',
+        'user-agent': 'GitHub-Hookshot/droppier',
       }
     case 'slack':
       return {
@@ -316,9 +316,9 @@ export function signPayload(options: SignOptions): Record<string, string> {
     case 'generic':
       return {
         'content-type': 'application/json',
-        'x-hookline-timestamp': String(timestamp),
-        'x-hookline-id': id,
-        'x-hookline-signature': hmacHex(secret, `${timestamp}.${rawBody}`),
+        'x-droppier-timestamp': String(timestamp),
+        'x-droppier-id': id,
+        'x-droppier-signature': hmacHex(secret, `${timestamp}.${rawBody}`),
       }
     default:
       return { 'content-type': 'application/json' }

@@ -8,7 +8,7 @@ import { openStore } from '../src/store.ts'
 import { signPayload } from '../src/verify.ts'
 
 function withStore(fn: (store: ReturnType<typeof openStore>) => void): void {
-  const dir = mkdtempSync(join(tmpdir(), 'hookline-store-'))
+  const dir = mkdtempSync(join(tmpdir(), 'droppier-store-'))
   const store = openStore(join(dir, 'inbox.db'))
   try {
     fn(store)
@@ -190,7 +190,7 @@ test('purge respects the retention cutoff and can wipe everything', () => {
 })
 
 test('migrations are idempotent across reopen', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'hookline-migrate-'))
+  const dir = mkdtempSync(join(tmpdir(), 'droppier-migrate-'))
   const file = join(dir, 'inbox.db')
   try {
     const first = openStore(file)
@@ -213,7 +213,7 @@ test('a database left half-migrated by an older build repairs itself', () => {
   // `replay_of` present, `note` missing, and the version still claiming 1. The
   // next start re-ran the migration and died on `duplicate column name`, which
   // bricked the inbox permanently.
-  const dir = mkdtempSync(join(tmpdir(), 'hookline-migrate-legacy-'))
+  const dir = mkdtempSync(join(tmpdir(), 'droppier-migrate-legacy-'))
   const file = join(dir, 'inbox.db')
   try {
     const first = openStore(file)
@@ -250,7 +250,7 @@ test('a failed migration rolls back and says so', () => {
   // The version bump shares the migration's transaction, so a failure can
   // never be recorded as applied — otherwise the next start would skip the
   // migration that never actually finished.
-  const dir = mkdtempSync(join(tmpdir(), 'hookline-migrate-fail-'))
+  const dir = mkdtempSync(join(tmpdir(), 'droppier-migrate-fail-'))
   const file = join(dir, 'inbox.db')
   try {
     const broken = new DatabaseSync(file)

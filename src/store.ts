@@ -148,7 +148,7 @@ function headerId(provider: string, headers: Record<string, string>): string | n
     github: ['x-github-delivery'],
     svix: ['svix-id'],
     shopify: ['x-shopify-webhook-id'],
-    generic: ['x-hookline-id'],
+    generic: ['x-droppier-id'],
   }
   for (const name of candidates[provider] ?? []) {
     const value = headers[name]

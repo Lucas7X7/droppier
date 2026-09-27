@@ -45,7 +45,7 @@ async function ensureKey(keyPath: string): Promise<string> {
   if (!existsSync(keyPath)) {
     mkdirSync(resolve(keyPath, '..'), { recursive: true })
     const generated = await new Promise<string>((resolvePromise, rejectPromise) => {
-      const child = spawn('ssh-keygen', ['-t', 'ed25519', '-N', '', '-C', 'hookline', '-f', keyPath])
+      const child = spawn('ssh-keygen', ['-t', 'ed25519', '-N', '', '-C', 'droppier', '-f', keyPath])
       let stderr = ''
       child.stderr.on('data', (chunk: Buffer) => {
         stderr += chunk.toString('utf8')
@@ -118,7 +118,7 @@ export function tunnelGuard(
 
   const report = (reason: string): void => {
     if (established) {
-      onLog?.(`  ! tunnel (${kind}) ${reason} — the public url is dead, restart \`hookline dev\``)
+      onLog?.(`  ! tunnel (${kind}) ${reason} — the public url is dead, restart \`droppier dev\``)
       return
     }
     established = true
@@ -143,9 +143,9 @@ export function tunnelGuard(
 }
 
 async function openSshTunnel(options: TunnelOptions): Promise<Tunnel> {
-  const keyPath = resolve(options.workdir, '.hookline', 'id_ed25519')
+  const keyPath = resolve(options.workdir, '.droppier', 'id_ed25519')
   const publicKey = await ensureKey(keyPath)
-  const name = options.name ?? `hookline-${randomBytes(3).toString('hex')}`
+  const name = options.name ?? `droppier-${randomBytes(3).toString('hex')}`
   const forward = options.name ? `${name}:80:127.0.0.1:${options.port}` : `80:127.0.0.1:${options.port}`
   const args = [
     '-o',
@@ -289,7 +289,7 @@ export function requestJson(
       target,
       {
         method: options.method ?? 'GET',
-        headers: options.token ? { 'x-hookline-token': options.token } : {},
+        headers: options.token ? { 'x-droppier-token': options.token } : {},
       },
       (res) => {
         const chunks: Buffer[] = []
@@ -310,9 +310,9 @@ export function requestJson(
                 : text.slice(0, 200)
             const hint =
               status === 401
-                ? ' — the inbox is locked; pass --token (the token `hookline dev` printed) or set HOOKLINE_TOKEN'
+                ? ' — the inbox is locked; pass --token (the token `droppier dev` printed) or set DROPIER_TOKEN'
                 : status === 404
-                  ? ' — no such event; ids can be abbreviated, try `hookline ls`'
+                  ? ' — no such event; ids can be abbreviated, try `droppier ls`'
                   : ''
             rejectPromise(new Error(`${status} ${target.pathname}${detail ? `: ${detail}` : ''}${hint}`))
             return
@@ -334,14 +334,14 @@ export function requestJson(
  * answered 503. Nothing said so. A tool whose only job is to hand you a working
  * url cannot afford to print one that does not work, quietly, for hours.
  *
- * `/_hookline/healthz` is used on purpose: it is served internally and never
+ * `/_droppier/healthz` is used on purpose: it is served internally and never
  * stored as an event, so probing does not fill the inbox with our own noise.
  */
 export function probePublicUrl(url: string, timeoutMs = 8000): Promise<boolean> {
   return new Promise((resolvePromise) => {
     let target: URL
     try {
-      target = new URL('/_hookline/healthz', url)
+      target = new URL('/_droppier/healthz', url)
     } catch {
       resolvePromise(false)
       return
