@@ -774,22 +774,23 @@ setInterval(() => {
     }
   }
   // Otherwise `connectBuckets` grows one entry per source IP forever, which is
-  // the same unbounded-memory-by-remote-attacker problem in a smaller size.
-  if (connectBuckets.size > TRACKED_IP_CAP) {
-    for (const [ip, bucket] of connectBuckets) {
-      if (bucket.full()) connectBuckets.delete(ip)
-    }
-    // Full buckets are the only ones worth keeping, but a flood that keeps
-    // every bucket drained means the sweep above reaps nothing and the map
-    // grows without limit — the cap would be a trigger rather than a bound.
-    // So past the cap, the oldest addresses go regardless of how full they are:
-    // forgetting a rate limit costs one attacker a slower flood, and the
-    // alternative is memory the attacker chooses the size of. Map iteration is
-    // insertion order, so the front is the oldest.
-    for (const ip of [...connectBuckets.keys()]) {
-      if (connectBuckets.size <= TRACKED_IP_CAP) break
-      connectBuckets.delete(ip)
-    }
+  // the same unbounded-memory-by-remote-attacker problem in a smaller size. A
+  // bucket that has refilled is indistinguishable from one that never existed,
+  // so it is collectable at any size — this pass is not gated on the cap, or a
+  // map sitting comfortably under it would keep every idle address forever.
+  for (const [ip, bucket] of connectBuckets) {
+    if (bucket.full(now)) connectBuckets.delete(ip)
+  }
+  // Full buckets are the only ones worth keeping, but a flood that keeps every
+  // bucket drained means the pass above reaps nothing and the map grows without
+  // limit — the cap would be a trigger rather than a bound. So past the cap, the
+  // oldest addresses go regardless of how full they are: forgetting a rate limit
+  // costs one attacker a slower flood, and the alternative is memory the attacker
+  // chooses the size of. Map iteration is insertion order, so the front is the
+  // oldest.
+  for (const ip of [...connectBuckets.keys()]) {
+    if (connectBuckets.size <= TRACKED_IP_CAP) break
+    connectBuckets.delete(ip)
   }
 }, SWEEP_MS)
 
