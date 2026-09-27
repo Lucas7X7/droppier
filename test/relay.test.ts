@@ -656,16 +656,53 @@ test('bookkeeping for idle source ips does not accumulate forever', async () => 
           }),
         )
       }
-      const grown = await status()
-      assert.ok(grown > 100, `expected the flood to be remembered, got ${grown}`)
 
-      // Buckets refill in a couple of seconds at the default rate; give the
-      // reaper several rounds and then it should have forgotten them.
-      await new Promise((r) => setTimeout(r, 2000))
-      const swept = await status()
+      // 120 addresses went in and the map is allowed to hold 64. Asserting it
+      // never exceeded 64 would be asserting something the design does not
+      // promise: the cap is applied by the sweep, so between sweeps the map is
+      // free to hold whatever arrived. What has to hold is that the next sweep
+      // brings it back under. Asserting it grew past the cap and stayed there
+      // would be asserting the leak this test exists to catch.
+      const flood = await status()
+      assert.ok(flood > 0, `the flood should have been rate limited, got ${flood}`)
+
+      const capped = await new Promise<number>((resolvePromise) => {
+        const timer = setTimeout(() => resolvePromise(-1), 10_000)
+        const poll = setInterval(() => {
+          void status().then((count) => {
+            if (count <= 64) {
+              clearInterval(poll)
+              clearTimeout(timer)
+              resolvePromise(count)
+            }
+          })
+        }, 100)
+      })
       assert.ok(
-        swept < grown,
-        `idle source addresses should be dropped, ${grown} -> ${swept} with a cap of 64`,
+        capped >= 0,
+        `the sweep should cap the map at 64, still at ${flood} of 120 addresses`,
+      )
+
+      // Buckets refill at connectPerMinute/60 tokens per second and the flood
+      // drained one token from each, so "full" — and therefore collectable — is
+      // about two seconds out, plus up to one sweep interval. Poll instead of
+      // sleeping a fixed amount: the exact moment is a race and a fixed sleep
+      // is either flaky or slow, never both right.
+      const swept = await new Promise<number>((resolvePromise) => {
+        const timer = setTimeout(() => resolvePromise(-1), 10_000)
+        const poll = setInterval(() => {
+          void status().then((count) => {
+            if (count < capped) {
+              clearInterval(poll)
+              clearTimeout(timer)
+              resolvePromise(count)
+            }
+          })
+        }, 100)
+      })
+      assert.ok(
+        swept >= 0,
+        `idle source addresses should be dropped, stuck at ${capped} of a cap of 64`,
       )
     },
     { RELAY_TRUST_PROXY: '1', RELAY_TRACKED_IP_CAP: '64', RELAY_SWEEP_MS: '250' },
