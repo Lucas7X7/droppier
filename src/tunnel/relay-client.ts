@@ -1,6 +1,6 @@
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
-import { NdjsonParser, encodeMessage } from '../relay-protocol.ts'
+import { NdjsonParser, encodeMessage, RELAY_CLIENT_PING_MS } from '../relay-protocol.ts'
 import type { RelayClientMessage, RelayServerMessage } from '../relay-protocol.ts'
 
 export interface RelayClientOptions {
@@ -97,7 +97,7 @@ export function createLocalProxyHandler(
     })
 }
 
-const PING_INTERVAL_MS = 20_000
+const PING_INTERVAL_MS = RELAY_CLIENT_PING_MS
 const STALL_TIMEOUT_MS = 60_000
 
 export function connectRelay(options: RelayClientOptions): RelayClient {
@@ -182,14 +182,31 @@ export function connectRelay(options: RelayClientOptions): RelayClient {
         res.setEncoding('utf8')
         res.on('data', (chunk: string) => {
           lastMessageAt = Date.now()
-          for (const message of parser.push(chunk) as RelayServerMessage[]) {
+          let messages: RelayServerMessage[]
+          try {
+            messages = parser.push(chunk) as RelayServerMessage[]
+          } catch (error) {
+            // The relay used to be able to kill this process with one malformed
+            // line, because JSON.parse ran unguarded inside an on('data')
+            // handler. The link is already untrustworthy at this point, so drop
+            // it and let the normal reconnect logic take over.
+            options.onLog?.(`  relay sent an unusable frame: ${(error as Error).message}`)
+            request?.destroy()
+            return
+          }
+          for (const message of messages) {
             if (message.type === 'ready') {
               options.onLog?.(`  relay assigned ${message.url}`)
               settleReady(null, message.url)
               continue
             }
             if (message.type === 'error') {
-              settleReady(new Error(`${message.code}: ${message.message}`))
+              const error = new Error(`${message.code}: ${message.message}`)
+              // Past the handshake `settleReady` is a no-op, so without this the
+              // one message that explains why the relay just dropped the tunnel
+              // would be the one message the client throws away.
+              if (readySettled) options.onLog?.(`  relay dropped the link: ${error.message}`)
+              settleReady(error)
               continue
             }
             if (message.type === 'request') {

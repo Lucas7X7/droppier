@@ -358,12 +358,18 @@ test('browser noise never lands in the inbox', async () => {
   try {
     // Found by opening the public url in a browser: every visit stored an
     // `unknown /favicon.ico unverified` event that nobody sent.
-    const before = await (await fetch(`${app.base}/_hookline/api/stats?t=${app.token}`)).json()
+    const stats = async (): Promise<{ total: number; unverified: number }> =>
+      (await (await fetch(`${app.base}/_hookline/api/stats?t=${app.token}`)).json()) as {
+        total: number
+        unverified: number
+      }
+
+    const before = await stats()
     for (const path of ['/favicon.ico', '/robots.txt']) {
       const res = await fetch(`${app.base}${path}`)
       assert.equal(res.status, 204, `${path} should be answered, not stored`)
     }
-    const after = await (await fetch(`${app.base}/_hookline/api/stats?t=${app.token}`)).json()
+    const after = await stats()
     assert.equal(after.total, before.total)
     assert.equal(after.unverified, before.unverified)
   } finally {

@@ -31,7 +31,7 @@
 ```
 
 ```bash
-node src/cli.ts dev
+npx hookline dev
 ```
 
 Every provider gets a URL that survives restarts. Every request that lands there is stored
@@ -54,8 +54,15 @@ SQLite file, no Docker, no database, no migration to run before you can debug so
 
 ## Install
 
-Node 24+ required — hookline uses the built-in `node:sqlite` and runs TypeScript natively, so
-there is **no build step and no runtime dependency**. Nothing to install.
+Node 24+ required — hookline uses the built-in `node:sqlite`, and has **no runtime dependency**.
+Nothing to install.
+
+```bash
+npx hookline dev
+```
+
+To work on hookline itself, clone and run the source directly — Node executes the TypeScript
+natively, so the clone needs no build either:
 
 ```bash
 git clone https://github.com/Lucas7X7/hookline.git
@@ -63,28 +70,25 @@ cd hookline
 node src/cli.ts dev
 ```
 
-Once it is on npm this becomes `npx hookline dev`. Until then the clone above is the whole
-install.
-
 ## Quick start
 
 ```bash
 # 1. start the inbox, get a public URL
-node src/cli.ts dev
+hookline dev
 
 # 2. prove the path locally, with a real signature:
-node src/cli.ts sign --provider stripe --secret whsec_... \
+hookline sign --provider stripe --secret whsec_... \
   --body '{"id":"evt_1","type":"charge.succeeded"}' | sh
 
 # 3. open the inbox that dev printed, hit / to search, j/k to move,
 #    r to replay, c to copy a replayable curl
 ```
 
-Every command below is written as `hookline <cmd>`; from a clone, run `node src/cli.ts <cmd>`
-or alias it once:
+Every command below is written as `hookline <cmd>`; from a clone, alias it once so the rest of
+this file works verbatim:
 
 ```bash
-alias hookline="node $PWD/src/cli.ts"   # $PWD expands now, so the rest of this file works verbatim
+alias hookline="node $PWD/src/cli.ts"   # $PWD expands now, so this survives a cd
 ```
 
 ## What you get
@@ -239,14 +243,19 @@ implementation of the seven schemes above, with no dependencies.
 ## Development
 
 ```bash
-npm test          # 82 tests: signatures, store, http, curl, cli, relay end-to-end
+npm test          # 103 tests: signatures, store, http, curl, cli, relay end-to-end
 npm run typecheck
+npm run build     # dist/ — what actually ships
 ```
 
 Node's built-in test runner, no test framework. The relay tests spawn the real relay and push a
 signed Stripe event through `relay → local server → inbox`, so the tunnel path is covered rather
 than mocked. CI runs the suite on Node 24 and current, typechecks, and builds the relay image to
 check it still starts and still rejects a bad token.
+
+`npm run build` is what `prepack` runs, so the published tarball is compiled JavaScript. Node
+refuses to strip types from files under `node_modules`, so a package that shipped its `.ts` sources
+would install and then fail on first run.
 
 ### Record the demo
 

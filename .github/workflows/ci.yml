@@ -44,6 +44,23 @@ jobs:
           # An unauthenticated client must be rejected, not silently connected.
           code=$(curl -s -o /dev/null -w '%{http_code}' -X POST 'http://127.0.0.1:8080/connect?name=x' -H 'Authorization: Bearer wrong')
           test "$code" = "401" || { echo "expected 401 for a bad token, got $code"; exit 1; }
+          # A client sending junk must cost it its own tunnel and nothing else.
+          # This one used to be an uncaught exception, in the image too. Run it
+          # inside the container so it is the shipped runtime under test.
+          docker exec relay node -e '
+            const { request } = require("node:http")
+            const req = request({ host: "127.0.0.1", port: 8080, method: "POST",
+              path: "/connect?name=ci", agent: false,
+              headers: { authorization: "Bearer ci-token", "content-type": "application/x-ndjson", "transfer-encoding": "chunked" } },
+              (res) => { console.log("connect ->", res.statusCode); res.resume() })
+            req.on("error", () => {})
+            req.write(JSON.stringify({ type: "hello", name: "ci", version: "1" }) + "\n")
+            setTimeout(() => req.write("not json\n"), 200)
+            setTimeout(() => { req.destroy(); process.exit(0) }, 1500)
+          '
+          curl -fsS http://127.0.0.1:8080/healthz > /dev/null || { echo "relay died on a malformed frame"; exit 1; }
+          # ...and the frame must have been rejected on purpose, not quietly eaten.
+          docker logs relay 2>&1 | grep -q "unusable frame" || { echo "the malformed frame was never rejected"; exit 1; }
           # The image must also run as the unprivileged `node` user.
           test "$(docker exec relay id -un)" = "node" || { echo "relay must not run as root"; exit 1; }
           echo "relay image ok"

@@ -14,12 +14,13 @@
     "url": "https://github.com/Lucas7X7/hookline/issues"
   },
   "bin": {
-    "hookline": "./src/cli.ts"
+    "hookline": "./dist/src/cli.js"
   },
   "engines": {
     "node": ">=24"
   },
   "files": [
+    "dist",
     "src",
     "relay",
     "examples",
@@ -27,6 +28,8 @@
   ],
   "scripts": {
     "dev": "node src/cli.ts dev",
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
     "test": "node --test",
     "test:watch": "node --test --watch",
     "typecheck": "tsc --noEmit",
